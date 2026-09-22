@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 
 interface AccountInfoRowProps {
   icon?: React.ReactNode;
@@ -46,7 +47,12 @@ export function AccountInfoRow({
   badge,
 }: AccountInfoRowProps) {
   const [localToggle, setLocalToggle] = useState(toggleValue);
-  const isClickable = (action === 'arrow' || onClick) && !disabled;
+
+  useEffect(() => {
+    setLocalToggle(toggleValue);
+  }, [toggleValue]);
+
+  const isClickable = (action === 'arrow' || action === 'toggle' || Boolean(onClick)) && !disabled;
 
   const handleToggle = () => {
     const next = !localToggle;
@@ -54,11 +60,20 @@ export function AccountInfoRow({
     onToggle?.(next);
   };
 
-  const Wrapper = isClickable ? 'button' : 'div';
+  const handleRowClick = () => {
+    if (disabled) return;
+    if (action === 'toggle') {
+      handleToggle();
+    } else if (onClick) {
+      onClick();
+    }
+  };
+
+  const Wrapper = isClickable && action !== 'toggle' ? 'button' : 'div';
 
   return (
     <Wrapper
-      onClick={isClickable ? onClick : undefined}
+      onClick={isClickable ? handleRowClick : undefined}
       className={`w-full flex items-center justify-between gap-4 px-5 py-3.5 transition-colors group ${
         isClickable
           ? 'cursor-pointer hover:bg-[var(--nav-hover-bg,#F8FAFD)] active:bg-[var(--bg-card-subtle,#F1F3F4)]'
@@ -113,24 +128,15 @@ export function AccountInfoRow({
           <ChevronRight className="w-4 h-4 text-[var(--text-muted,#747775)] group-hover:text-[var(--text-primary,#1F1F1F)] transition-all group-hover:translate-x-0.5" />
         )}
         {action === 'toggle' && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleToggle();
+          <ToggleSwitch
+            checked={localToggle}
+            onChange={(next) => {
+              setLocalToggle(next);
+              onToggle?.(next);
             }}
-            className={`relative w-11 h-6 rounded-full transition-all duration-200 ${
-              localToggle
-                ? 'bg-[var(--brand-primary,#1A73E8)]'
-                : 'bg-[var(--border-card,#DADCE0)]'
-            }`}
-          >
-            <span
-              className={`inline-block w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-200 ${
-                localToggle ? 'translate-x-5' : 'translate-x-0.5'
-              }`}
-            />
-          </button>
+            disabled={disabled}
+            ariaLabel={label}
+          />
         )}
         {action === 'custom' && customAction}
       </div>
