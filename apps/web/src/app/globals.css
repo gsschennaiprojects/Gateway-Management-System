@@ -1,0 +1,430 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: var(--font-fraunces), Georgia, Cambria, serif;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-mono), "JetBrains Mono", Consolas, monospace;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   §1  MULTI-THEME TOKENS — Light, Dark & Eye Protection Mode
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 1.1 Default & Light Mode: Google Workspace Light */
+:root,
+[data-theme="light"] {
+  --bg-canvas:           #F8FAFD;
+  --bg-card:             #FFFFFF;
+  --bg-card-subtle:      #F1F3F4;
+  --bg-card-hover:       #F8FAFD;
+  --border-card:         #DADCE0;
+  --border-subtle:       #E8EAED;
+  --border-focus:        #1A73E8;
+
+  --text-primary:        #1F1F1F;
+  --text-secondary:      #444746;
+  --text-muted:          #747775;
+  --text-ghost:          #8E918F;
+  --text-on-brand:       #FFFFFF;
+
+  --brand-primary:       #1A73E8;
+  --brand-primary-hover: #1557B0;
+  --brand-container:     #E8F0FE;
+  --brand-on-container:  #1A73E8;
+
+  --nav-active-bg:       #C2E7FF;
+  --nav-active-text:     #001D35;
+  --nav-hover-bg:        #F1F3F4;
+
+  --badge-success-bg:    #E6F4EA;
+  --badge-success-text:  #137333;
+  --badge-success-border:#CEEAD6;
+
+  --badge-warning-bg:    #FEF7E0;
+  --badge-warning-text:  #B06000;
+  --badge-warning-border:#FEEFC3;
+
+  --badge-danger-bg:     #FCE8E6;
+  --badge-danger-text:   #C5221F;
+  --badge-danger-border: #FAD2CF;
+
+  --card-shadow:         0 1px 2px 0 rgba(60, 64, 67, 0.08), 0 1px 3px 1px rgba(60, 64, 67, 0.04);
+  --card-shadow-hover:   0 1px 3px 0 rgba(60, 64, 67, 0.2), 0 4px 8px 3px rgba(60, 64, 67, 0.1);
+  --popover-shadow:      0 4px 16px 0 rgba(60, 64, 67, 0.25);
+  --selection-bg:        #C2E7FF;
+  --selection-text:      #001D35;
+
+  /* Backward Compatibility Aliases */
+  --google-bg:           var(--bg-canvas);
+  --google-surface:      var(--bg-card);
+  --google-surface-2:    var(--bg-card-subtle);
+  --google-surface-3:    var(--bg-card-hover);
+  --google-border:       var(--border-card);
+  --google-border-subtle:var(--border-subtle);
+  --google-active-pill:  var(--nav-active-bg);
+  --google-active-text:  var(--nav-active-text);
+  --ink-text-primary:    var(--text-primary);
+  --ink-text-secondary:  var(--text-secondary);
+  --ink-text-muted:      var(--text-muted);
+  --ink-text-ghost:      var(--text-ghost);
+  --brand-blue:          var(--brand-primary);
+  --brand-blue-deep:     var(--brand-primary-hover);
+  --brand-blue-light:    var(--brand-container);
+  --status-success:      var(--badge-success-text);
+  --status-success-dim:  var(--badge-success-bg);
+  --status-warning:      var(--badge-warning-text);
+  --status-warning-dim:  var(--badge-warning-bg);
+  --status-danger:       var(--badge-danger-text);
+  --status-danger-dim:   var(--badge-danger-bg);
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 1.2 Dark Mode: Google Material Dark / Android 14+ */
+[data-theme="dark"] {
+  --bg-canvas:           #131314;
+  --bg-card:             #1E1F20;
+  --bg-card-subtle:      #282A2C;
+  --bg-card-hover:       #2D2F31;
+  --border-card:         #3C4043;
+  --border-subtle:       #2D3033;
+  --border-focus:        #8AB4F8;
+
+  --text-primary:        #E3E3E3;
+  --text-secondary:      #C4C7C5;
+  --text-muted:          #8E918F;
+  --text-ghost:          #747775;
+  --text-on-brand:       #001D35;
+
+  --brand-primary:       #8AB4F8;
+  --brand-primary-hover: #A8C7FA;
+  --brand-container:     #004A77;
+  --brand-on-container:  #C2E7FF;
+
+  --nav-active-bg:       #004A77;
+  --nav-active-text:     #C2E7FF;
+  --nav-hover-bg:        #282A2C;
+
+  --badge-success-bg:    #0F381E;
+  --badge-success-text:  #81C995;
+  --badge-success-border:#1B5E20;
+
+  --badge-warning-bg:    #382E00;
+  --badge-warning-text:  #FDD663;
+  --badge-warning-border:#594400;
+
+  --badge-danger-bg:     #3E1815;
+  --badge-danger-text:   #F28B82;
+  --badge-danger-border: #5C221E;
+
+  --card-shadow:         0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --card-shadow-hover:   0 4px 12px 0 rgba(0, 0, 0, 0.6);
+  --popover-shadow:      0 8px 24px 0 rgba(0, 0, 0, 0.7);
+  --selection-bg:        #004A77;
+  --selection-text:      #C2E7FF;
+}
+
+/* 1.3 Eye Protection Mode: Warm Amber / Circadian Care Reading Paper */
+[data-theme="eye-care"] {
+  --bg-canvas:           #F4EFE6;
+  --bg-card:             #FCF9F2;
+  --bg-card-subtle:      #EFE6D8;
+  --bg-card-hover:       #F7F1E6;
+  --border-card:         #DDD2C1;
+  --border-subtle:       #E8DEC0;
+  --border-focus:        #C05621;
+
+  --text-primary:        #2D251E;
+  --text-secondary:      #584B3F;
+  --text-muted:          #7D6F61;
+  --text-ghost:          #998A7B;
+  --text-on-brand:       #FFFFFF;
+
+  --brand-primary:       #C05621;
+  --brand-primary-hover: #9C4215;
+  --brand-container:     #FEF3C7;
+  --brand-on-container:  #78350F;
+
+  --nav-active-bg:       #FDE68A;
+  --nav-active-text:     #78350F;
+  --nav-hover-bg:        #EFE6D8;
+
+  --badge-success-bg:    #E8F5E9;
+  --badge-success-text:  #2E7D32;
+  --badge-success-border:#C8E6C9;
+
+  --badge-warning-bg:    #FEF3C7;
+  --badge-warning-text:  #B45309;
+  --badge-warning-border:#FDE68A;
+
+  --badge-danger-bg:     #FEE2E2;
+  --badge-danger-text:   #B91C1C;
+  --badge-danger-border: #FECACA;
+
+  --card-shadow:         0 1px 3px 0 rgba(100, 80, 60, 0.08), 0 1px 2px 0 rgba(100, 80, 60, 0.04);
+  --card-shadow-hover:   0 3px 8px 0 rgba(100, 80, 60, 0.12);
+  --popover-shadow:      0 6px 18px 0 rgba(100, 80, 60, 0.18);
+  --selection-bg:        #FDE68A;
+  --selection-text:      #78350F;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   §2  BASE STYLES
+   ═══════════════════════════════════════════════════════════════ */
+body {
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  min-height: 100vh;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-text);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   §3  CARDS & PANELS (THEME ADAPTIVE)
+   ═══════════════════════════════════════════════════════════════ */
+
+.glass-panel {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+  color: var(--text-primary);
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.glass-panel-subtle {
+  position: relative;
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+}
+
+.glass-panel-elevated {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow-hover);
+  color: var(--text-primary);
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+}
+
+.glass-panel-interactive {
+  transition: all 0.2s var(--ease-spring);
+  cursor: pointer;
+}
+
+.glass-panel-interactive:hover {
+  border-color: var(--brand-primary);
+  transform: translateY(-1px) translateZ(0);
+  box-shadow: var(--card-shadow-hover);
+}
+
+.glass-panel-interactive:active {
+  transform: translateY(0) scale(0.995);
+}
+
+/* Fast tactile click feedback on interactive buttons */
+button:active:not(:disabled) {
+  transform: scale(0.985);
+  transition: transform 0.08s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Hardware accelerated smooth scrolling & crisp typography */
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   §4  KEYFRAME ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes panelEntrance {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-panel-entrance {
+  animation: panelEntrance 0.3s var(--ease-spring) forwards;
+}
+
+@keyframes shimmer {
+  0% {
+    background-color: var(--bg-card-subtle);
+    opacity: 0.6;
+  }
+  50% {
+    background-color: var(--bg-card-hover);
+    opacity: 1;
+  }
+  100% {
+    background-color: var(--bg-card-subtle);
+    opacity: 0.6;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+  background-color: var(--bg-card-subtle);
+}
+
+/* Custom Google Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-card);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Hide Next.js dev portal icon & indicator */
+nextjs-portal,
+[data-nextjs-toast],
+[data-nextjs-dialog-overlay],
+#nextjs-dev-overlay {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   §5  PROFESSIONAL PRINT & PDF EXPORT STYLESHEET
+   ═══════════════════════════════════════════════════════════════ */
+@page {
+  size: A4 portrait;
+  margin: 12mm 10mm 15mm 10mm;
+}
+
+@media print {
+  /* Reset document background & text colors for high-contrast crisp output */
+  html, body {
+    background: #ffffff !important;
+    color: #1f1f1f !important;
+    font-size: 11pt !important;
+    line-height: 1.4 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide navigation, sidebars, interactive controls & export buttons */
+  aside,
+  nav,
+  header,
+  button,
+  .no-print,
+  [data-no-print],
+  [role="dialog"] > div:first-child:not([role="document"]) {
+    /* If modal is open, we want the modal content visible, but hide fixed backdrop */
+  }
+
+  /* Specific elements to hide in print */
+  aside,
+  nav,
+  header,
+  .no-print,
+  [data-no-print] {
+    display: none !important;
+  }
+
+  /* Ensure all cards, tables, and panels expand fully without scrollbars */
+  * {
+    overflow: visible !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Container adjustments for full width printing */
+  main, [role="main"], .max-w-7xl, .max-w-4xl, .max-w-\[1400px\] {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Clean borders and readable table rows */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  th, td {
+    border: 1px solid #d1d5db !important;
+    padding: 6px 8px !important;
+    font-size: 9pt !important;
+    color: #111827 !important;
+  }
+
+  th {
+    background-color: #f3f4f6 !important;
+    font-weight: 600 !important;
+  }
+
+  /* Avoid breaking critical info cards across page splits */
+  .rounded-2xl, .bg-card, [class*="bg-[var(--bg-card"] {
+    border: 1px solid #e5e7eb !important;
+    page-break-inside: avoid;
+    margin-bottom: 12px !important;
+    background: #ffffff !important;
+  }
+}
+

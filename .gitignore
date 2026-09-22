@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production build outputs
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Environment variables and secrets
+.env*.local
+.env
+!.env.example
+*.pem
+
+# Service account keys (keep local only)
+management-system-*.json
+client_secret_*.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Editor & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

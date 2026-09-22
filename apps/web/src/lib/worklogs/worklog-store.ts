@@ -1,0 +1,93 @@
+import { WorkLogEntry, StaffMonthlySummary } from '@/types/worklog';
+import { User, UserRole, Branch } from '@/types/auth';
+import { getAllUsers, findUserById } from '@/lib/auth/user-store';
+
+// Runtime work logs store
+let serverWorkLogs: WorkLogEntry[] = [];
+
+/**
+ * Filter work logs according to strict hierarchical security rules:
+ * - Super Admin: Can view work logs of ALL roles (Admin, HR, Employee, Intern) across all branches.
+ * - Admin: Can view work logs of Employees and Interns strictly in their own branch.
+ * - HR: Can view work logs of Employees and Interns across the system.
+ * - Employee/Intern: Can only view their own work logs.
+ */
+export function getWorkLogs(actor: User, filter?: { targetUserId?: string; branch?: Branch | 'all'; date?: string }): WorkLogEntry[] {
+  let logs = [...serverWorkLogs];
+
+  if (actor.role === 'superadmin') {
+    // Super Admin can see everyone
+    if (filter?.branch && filter.branch !== 'all') {
+      logs = logs.filter((l) => l.branch === filter.branch);
+    }
+    if (filter?.targetUserId) {
+      logs = logs.filter((l) => l.userId === filter.targetUserId);
+    }
+  } else if (actor.role === 'admin') {
+    // Admin can ONLY see employees and interns in their own branch
+    logs = logs.filter(
+      (l) =>
+        l.branch === actor.branch &&
+        ['employee', 'intern'].includes(l.userRole)
+    );
+    if (filter?.targetUserId) {
+      logs = logs.filter((l) => l.userId === filter.targetUserId);
+    }
+  } else if (actor.role === 'hr') {
+    // HR can see employees and interns
+    logs = logs.filter((l) => ['employee', 'intern'].includes(l.userRole));
+    if (filter?.targetUserId) {
+      logs = logs.filter((l) => l.userId === filter.targetUserId);
+    }
+  } else {
+    // Employee or Intern can only see their own logs
+    logs = logs.filter((l) => l.userId === actor.id);
+  }
+
+  if (filter?.date) {
+    logs = logs.filter((l) => l.date === filter.date);
+  }
+
+  return logs;
+}
+
+export function getWorkLogsForUser(actor: User, targetUserId: string): WorkLogEntry[] {
+  return getWorkLogs(actor, { targetUserId });
+}
+
+export function getStaffMonthlySummary(targetUserId: string): StaffMonthlySummary {
+  const user = findUserById(targetUserId) || getAllUsers().find((u) => u.id === targetUserId);
+  const userLogs = serverWorkLogs.filter((l) => l.userId === targetUserId);
+
+  const totalPlanned = userLogs.reduce((sum, l) => sum + l.plannedTasks.length, 0);
+  const totalCompleted = userLogs.reduce((sum, l) => sum + l.completedTasks.length, 0);
+  const presentDays = userLogs.filter((l) => l.attendanceStatus === 'present').length;
+  const workingDays = 26; // Working days in Sep 2026
+
+  return {
+    userId: targetUserId,
+    userName: user?.name || 'Staff Member',
+    userRole: user?.role || 'employee',
+    branch: user?.branch || 'Coimbatore',
+    month: 'September 2026',
+    totalWorkingDays: workingDays,
+    presentDays,
+    absentDays: 0,
+    holidayDays: 0,
+    attendanceRate: workingDays > 0 ? Math.round((presentDays / workingDays) * 1000) / 10 : 0,
+    totalPlannedTasks: totalPlanned,
+    totalCompletedTasks: totalCompleted,
+    completionRate: totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0,
+    assignedStudentsCount: 0
+  };
+}
+
+export function addWorkLog(entry: Omit<WorkLogEntry, 'id'> & { id?: string }): WorkLogEntry {
+  const newEntry: WorkLogEntry = {
+    id: entry.id || `wlg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    ...entry,
+  };
+  serverWorkLogs.unshift(newEntry);
+  return newEntry;
+}
+

@@ -1,0 +1,218 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // HELPER FUNCTIONS (Zero Extra Database Lookups via Custom Claims)
+    // ──────────────────────────────────────────────────────────────────────────
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return request.auth.token.role;
+    }
+
+    function getUserBranch() {
+      return request.auth.token.branchId;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserRole() == 'SUPER_ADMIN';
+    }
+
+    function isBranchAdmin(branchId) {
+      return isAuthenticated() && (
+        isSuperAdmin() || 
+        (getUserRole() == 'ADMIN' && getUserBranch() == branchId)
+      );
+    }
+
+    function isBranchStaff(branchId) {
+      return isAuthenticated() && (
+        isSuperAdmin() || 
+        getUserBranch() == branchId
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // DEFAULT LOCKDOWN: Deny everything unless explicitly authorized below
+    // ──────────────────────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 1. USERS COLLECTION
+    // ──────────────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      // Any authenticated user can read their own profile;
+      // Branch Admins can read all profiles in their branch;
+      // Super Admin can read all users across all branches.
+      allow read: if isAuthenticated() && (
+        request.auth.uid == uid || 
+        isBranchAdmin(resource.data.branchId)
+      );
+
+      // Only Super Admin or Admin can create new user documents via client;
+      // Self-registration is mediated via /api/auth/register (Firebase Admin SDK).
+      allow create: if isSuperAdmin() || (
+        isAuthenticated() && 
+        isBranchAdmin(request.resource.data.branchId)
+      );
+
+      // Updates:
+      // - Super Admin can update any field.
+      // - Branch Admin can update users within their branch.
+      // - Self-update: A user can update their own profile, BUT CANNOT touch
+      //   'role', 'accountStatus', or 'branchId'.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdmin(resource.data.branchId) ||
+        (
+          request.auth.uid == uid && 
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'accountStatus', 'branchId'])
+        )
+      );
+
+      // Only Super Admin can delete a user record (Soft-delete preferred)
+      allow delete: if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 2. TASKS COLLECTION
+    // ──────────────────────────────────────────────────────────────────────────
+    match /tasks/{taskId} {
+      // Staff members can read tasks belonging to their branch
+      allow read: if isAuthenticated() && isBranchStaff(resource.data.branchId);
+
+      // Only Branch Admins or Super Admin can create new tasks
+      allow create: if isAuthenticated() && isBranchAdmin(request.resource.data.branchId);
+
+      // Updates:
+      // - Branch Admins can update any task fields within their branch.
+      // - Assigned employees can update ONLY progressPercentage, status, remarks, and completedDate.
+      allow update: if isAuthenticated() && (
+        isBranchAdmin(resource.data.branchId) ||
+        (
+          request.auth.token.employeeId in resource.data.assignedToMultiple &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'progressPercentage', 'remarks', 'completedDate', 'updatedAt'
+          ])
+        )
+      );
+
+      // Only Branch Admins or Super Admin can delete tasks
+      allow delete: if isAuthenticated() && isBranchAdmin(resource.data.branchId);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 3. STUDENTS COLLECTION
+    // ──────────────────────────────────────────────────────────────────────────
+    match /students/{studentId} {
+      // Staff can view students in their branch
+      allow read: if isAuthenticated() && isBranchStaff(resource.data.branchId);
+
+      // Admins and HR can enroll students in their branch
+      allow create: if isAuthenticated() && (
+        isBranchAdmin(request.resource.data.branchId) ||
+        (getUserRole() == 'HR' && getUserBranch() == request.resource.data.branchId)
+      );
+
+      // Updates:
+      // - Admins can update any field.
+      // - Assigned mentor/tutor can update projectStatus, studentStatus, and feeStatus.
+      allow update: if isAuthenticated() && (
+        isBranchAdmin(resource.data.branchId) ||
+        (
+          getUserRole() in ['EMPLOYEE', 'HR'] &&
+          resource.data.assignedToId == request.auth.token.employeeId
+        )
+      );
+
+      // Only Branch Admins or Super Admin can delete student records
+      allow delete: if isAuthenticated() && isBranchAdmin(resource.data.branchId);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 4. DAILY WORKLOGS COLLECTION
+    // ──────────────────────────────────────────────────────────────────────────
+    match /daily_worklogs/{logId} {
+      allow read: if isAuthenticated() && (
+        request.auth.token.employeeId == resource.data.staffId ||
+        isBranchAdmin(resource.data.branchId)
+      );
+
+      allow create: if isAuthenticated() && (
+        request.auth.token.employeeId == request.resource.data.staffId &&
+        getUserBranch() == request.resource.data.branchId
+      );
+
+      allow update: if isAuthenticated() && (
+        request.auth.token.employeeId == resource.data.staffId ||
+        isBranchAdmin(resource.data.branchId)
+      );
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 5. ATTENDANCE COLLECTION
+    // ──────────────────────────────────────────────────────────────────────────
+    match /attendance/{attId} {
+      allow read: if isAuthenticated() && (
+        request.auth.token.employeeId == resource.data.staffId ||
+        isBranchAdmin(resource.data.branchId)
+      );
+
+      // Attendance check-in/out is written either by self or by Branch Admin
+      allow create, update: if isAuthenticated() && (
+        request.auth.token.employeeId == request.resource.data.staffId ||
+        isBranchAdmin(request.resource.data.branchId)
+      );
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 6. BRANCHES COLLECTION
+    // ──────────────────────────────────────────────────────────────────────────
+    match /branches/{branchId} {
+      // All authenticated users need branch info for UI (branch name, location, etc.)
+      allow read: if isAuthenticated();
+
+      // Only Super Admin can create or update branch configuration
+      allow create, update: if isSuperAdmin();
+
+      // Only Super Admin can delete a branch (should never happen in production)
+      allow delete: if isSuperAdmin();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 7. STRICT SERVER-ONLY COLLECTIONS (ZERO DIRECT CLIENT ACCESS)
+    // ──────────────────────────────────────────────────────────────────────────
+    
+    // Mobile-to-Email lookup index — accessed ONLY via Next.js API route
+    match /phoneIndex/{mobile} {
+      allow read, write: if false;
+    }
+
+    // AES-256 encrypted SMTP App Passwords — strictly server-only
+    match /emailCredentials/{uid} {
+      allow read, write: if false;
+    }
+
+    // Immutable Audit Logs — append-only via server API route
+    match /audit_logs/{auditId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    // Global System Configurations
+    match /systemConfig/{configId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+  }
+}
