@@ -1,5 +1,22 @@
 {
-  "dependencies": {
-    "googleapis": "^181.0.0"
+  "name": "gateway-management-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gateway Software Solutions (GSS) Enterprise Management Portal",
+  "scripts": {
+    "dev": "npm run dev --prefix apps/web",
+    "build": "npm run build --prefix apps/web",
+    "start": "npm run start --prefix apps/web",
+    "lint": "npm run lint --prefix apps/web",
+    "test": "npm run test --prefix apps/web",
+    "test:unit": "npm run test:unit --prefix apps/web",
+    "test:e2e": "npm run test:e2e --prefix apps/web",
+    "test:benchmark": "npm run test:benchmark --prefix apps/web"
+  },
+  "workspaces": [
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
