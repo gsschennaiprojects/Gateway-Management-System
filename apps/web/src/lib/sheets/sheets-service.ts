@@ -264,6 +264,58 @@ export async function findRow(
   return null;
 }
 
+/**
+ * Delete rows matching a filter predicate (from row 2 onwards, preserving header).
+ */
+export async function deleteRowsMatching(
+  spreadsheetId: string,
+  tabName: string,
+  filterFn: (row: string[]) => boolean
+): Promise<number> {
+  const api = await getSheetsApi();
+  const meta = await rateLimitedCall(
+    () => api.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties' }),
+    'get sheetId for delete'
+  );
+  const sheet = (meta.data.sheets || []).find(s => s.properties?.title === tabName);
+  if (!sheet || sheet.properties?.sheetId === undefined) return 0;
+  const sheetId = sheet.properties.sheetId;
+
+  const rows = await readSheet(spreadsheetId, tabName);
+  const matchingIndices: number[] = [];
+  // Skip header (index 0)
+  for (let i = 1; i < rows.length; i++) {
+    if (filterFn(rows[i])) {
+      matchingIndices.push(i);
+    }
+  }
+
+  if (matchingIndices.length === 0) return 0;
+
+  // Delete from bottom to top so indices don't shift
+  matchingIndices.sort((a, b) => b - a);
+  const requests: sheets_v4.Schema$Request[] = matchingIndices.map(idx => ({
+    deleteDimension: {
+      range: {
+        sheetId,
+        dimension: 'ROWS',
+        startIndex: idx,
+        endIndex: idx + 1
+      }
+    }
+  }));
+
+  await rateLimitedCall(
+    () => api.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests }
+    }),
+    `delete matching rows in ${tabName}`
+  );
+
+  return matchingIndices.length;
+}
+
 // ─── Typed Worklog Operations ──────────────────────────────────────────────────
 
 export interface WorklogRow {
