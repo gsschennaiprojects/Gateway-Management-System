@@ -34,20 +34,17 @@ export async function POST(req: NextRequest) {
         const branchCode = BRANCH_NAME_TO_CODE[user.branch];
         const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
         if (spreadsheetId) {
-          await appendAttendanceRecord(spreadsheetId, [
-            attId,
-            todayStr,
-            dayStr,
-            user.id,
-            user.name,
-            user.role,
-            '-',
-            timeStr,
-            '0',
-            'Logged Out',
-            'Web App Logout',
-            now.toISOString()
-          ]);
+          const { punchOutStaffAttendanceRecord } = await import('@/lib/sheets/sheets-service');
+          await punchOutStaffAttendanceRecord(spreadsheetId, {
+            staffId: user.id,
+            staffName: user.name,
+            role: user.role,
+            date: todayStr,
+            day: dayStr,
+            checkOutTime: timeStr,
+            totalHours: 8.5,
+            markedBy: 'Web App Logout',
+          });
         }
       } catch (sheetErr) {
         console.warn('[Logout] Attendance Sheets sync note:', sheetErr);

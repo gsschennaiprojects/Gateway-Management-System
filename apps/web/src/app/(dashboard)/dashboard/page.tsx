@@ -25,9 +25,13 @@ import {
   CheckSquare,
   Users,
   ArrowRight,
-  Calendar
+  Calendar,
+  Timer,
+  Sparkles,
 } from 'lucide-react';
 import { formatStudentDate } from '@/types/student';
+import { TaskPointInput } from '@/components/worklog/TaskPointInput';
+import { useDailySession } from '@/lib/worklogs/useDailySession';
 
 interface Student {
   id: string;
@@ -73,76 +77,26 @@ export default function EmployeeDashboardPage() {
     }
   };
 
-  // Daily Punch In / Out State (Auto-marked Present upon staff login)
-  const [isPunchedIn, setIsPunchedIn] = useState(true);
-  const [punchInTime, setPunchInTime] = useState<string | null>(null);
-  const [plannedTasks, setPlannedTasks] = useState<string[]>([]);
-  const [newTaskInput, setNewTaskInput] = useState('');
-
-  // Punch Out state
-  const [isPunchedOut, setIsPunchedOut] = useState(false);
-  const [punchOutTime, setPunchOutTime] = useState<string | null>(null);
-  const [completedTasks, setCompletedTasks] = useState<string[]>([]);
-  const [completedTaskInput, setCompletedTaskInput] = useState('');
-
-  // Auto-mark attendance present upon staff login
-  useEffect(() => {
-    if (!user) return;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const key = `gss_punch_${user.id}_${todayStr}`;
-    const stored = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setIsPunchedIn(true);
-        setPunchInTime(parsed.time || '09:00 AM');
-      } catch (e) {
-        setIsPunchedIn(true);
-      }
-    } else {
-      const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      setIsPunchedIn(true);
-      setPunchInTime(nowTime);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(key, JSON.stringify({ time: nowTime, status: 'Present' }));
-      }
-    }
-  }, [user]);
+  // Daily Punch In / Out and Task Dispatch (Unified with /worklog)
+  const {
+    liveDate,
+    loginTime,
+    logoutTime,
+    isPunchedIn,
+    isPunchedOut,
+    plannedTasks,
+    setPlannedTasks,
+    completedTasks,
+    setCompletedTasks,
+    totalHours,
+    workingCalc,
+    elapsedTime,
+    punchIn,
+    punchOut,
+  } = useDailySession();
 
   // Student Attendance List State
   const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
-
-  const handlePunchIn = () => {
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setPunchInTime(timeStr);
-    setIsPunchedIn(true);
-    if (user && typeof window !== 'undefined') {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      localStorage.setItem(`gss_punch_${user.id}_${todayStr}`, JSON.stringify({ time: timeStr, status: 'Present' }));
-    }
-  };
-
-  const handlePunchOut = () => {
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setPunchOutTime(timeStr);
-    setIsPunchedOut(true);
-  };
-
-  const addPlannedTask = () => {
-    if (!newTaskInput.trim()) return;
-    setPlannedTasks([...plannedTasks, newTaskInput.trim()]);
-    setNewTaskInput('');
-  };
-
-  const removePlannedTask = (idx: number) => {
-    setPlannedTasks(plannedTasks.filter((_, i) => i !== idx));
-  };
-
-  const addCompletedTask = () => {
-    if (!completedTaskInput.trim()) return;
-    setCompletedTasks([...completedTasks, completedTaskInput.trim()]);
-    setCompletedTaskInput('');
-  };
 
   const toggleStudentStatus = (studentId: string) => {
     setStudents(
@@ -206,8 +160,11 @@ export default function EmployeeDashboardPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="text-xs text-[var(--text-secondary,#5F6368)] bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)] px-3.5 py-1.5 rounded-full font-medium">
-            Today: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          <span className="text-xs text-[var(--text-secondary,#5F6368)] bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)] px-3.5 py-1.5 rounded-full font-medium flex items-center gap-1.5 shadow-2xs">
+            <Calendar className="w-3.5 h-3.5 text-[var(--brand-primary,#1A73E8)]" />
+            <span>Today: {liveDate.dayOfWeek}, {liveDate.formattedDate}</span>
+            <span className="text-[var(--text-muted,#747775)]">•</span>
+            <span className="font-mono text-[var(--text-secondary,#5F6368)]">{liveDate.currentTime}</span>
           </span>
         </div>
       </div>
@@ -223,7 +180,7 @@ export default function EmployeeDashboardPage() {
           absentDays={1}
           holidayDays={3}
           workingDaysTotal={26}
-          monthName="September 2026"
+          monthName={liveDate.monthName}
         />
       </div>
 
@@ -326,151 +283,129 @@ export default function EmployeeDashboardPage() {
         )}
       </GlassPanel>
 
-      {/* Daily Login/Logout Card */}
+      {/* Daily Login/Logout Card — Fully Unified with /worklog */}
       <GlassPanel className="p-6 md:p-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-[var(--border-card,#DADCE0)]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[var(--badge-warning-bg,#FEF7E0)] text-[var(--badge-warning-text,#B06000)] border border-[var(--badge-warning-border,#FEEFC3)] flex items-center justify-center">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-[var(--badge-warning-bg,#FEF7E0)] text-[var(--badge-warning-text,#B06000)] border border-[var(--badge-warning-border,#FEEFC3)] flex items-center justify-center shadow-2xs">
               <Clock className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary,#1F1F1F)]">
-                Daily Session & Task Dispatch
-              </h2>
-              <p className="text-xs text-[var(--text-secondary,#5F6368)]">
-                Log your planned agenda at check-in and mark deliverables at checkout.
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-semibold text-[var(--text-primary,#1F1F1F)]">
+                  Daily Session &amp; Task Dispatch
+                </h2>
+                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[var(--brand-container,#E8F0FE)] text-[var(--brand-primary,#1A73E8)] border border-[var(--border-subtle,#D2E3FC)]">
+                  {liveDate.dayOfWeek}, {liveDate.formattedDate}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] text-[10px] font-medium border border-[var(--badge-success-border,#CEEAD6)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                  Synced with /worklog
+                </span>
+              </div>
+              <p className="text-xs text-[var(--text-secondary,#5F6368)] mt-0.5">
+                Log planned agenda at check-in and mark deliverables point-by-point at checkout.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {!isPunchedIn ? (
+          <div className="flex items-center gap-3 flex-wrap">
+            {!loginTime ? (
               <Button
                 variant="primary"
-                onClick={handlePunchIn}
+                onClick={() => punchIn()}
                 leftIcon={<LogIn className="w-4 h-4" />}
               >
-                Log In (Punch In)
+                Log In (Punch In at {liveDate.currentTime})
               </Button>
-            ) : !isPunchedOut ? (
-              <div className="flex items-center gap-3">
+            ) : !logoutTime ? (
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="text-xs px-3 py-1.5 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)] font-medium flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  Auto-Marked Present at {punchInTime}
+                  Punched In: {loginTime}
                 </span>
+                {elapsedTime && (
+                  <span className="text-xs px-3 py-1.5 rounded-full bg-[var(--brand-container,#E8F0FE)] text-[var(--brand-primary,#1A73E8)] font-medium flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                    Active: {elapsedTime.shortFormatted}
+                  </span>
+                )}
                 <Button
                   variant="danger"
-                  onClick={handlePunchOut}
+                  onClick={() => punchOut()}
                   leftIcon={<LogOut className="w-4 h-4" />}
                 >
-                  Log Out (Punch Out)
+                  Log Out (Punch Out at {liveDate.currentTime})
                 </Button>
               </div>
             ) : (
-              <span className="text-xs px-3.5 py-1.5 rounded-full bg-[var(--bg-card-subtle,#F1F3F4)] text-[var(--text-secondary,#5F6368)] font-medium border border-[var(--border-subtle,#E8EAED)]">
-                Session Concluded ({punchInTime} – {punchOutTime})
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs px-3.5 py-1.5 rounded-full bg-[var(--bg-card-subtle,#F1F3F4)] text-[var(--text-secondary,#5F6368)] font-medium border border-[var(--border-subtle,#E8EAED)] flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-blue-600" />
+                  Session Concluded ({loginTime} – {logoutTime})
+                </span>
+                {workingCalc && (
+                  <span className="text-xs px-3 py-1.5 rounded-full bg-[var(--brand-container,#E8F0FE)] text-[var(--brand-primary,#1A73E8)] font-semibold border border-[var(--border-subtle,#D2E3FC)]">
+                    Total: {workingCalc.formatted} ({workingCalc.decimalHours} hrs)
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>
 
-        {/* Stacked Task Lists */}
+        {/* Dynamic Total Working Time Banner if concluded or calculated */}
+        {workingCalc ? (
+          <div className="mb-6 p-4 rounded-2xl bg-[var(--brand-container,#E8F0FE)]/60 border border-[var(--border-subtle,#D2E3FC)] flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Timer className="w-4 h-4 text-[var(--brand-primary,#1A73E8)]" />
+              <span className="text-xs font-semibold text-[var(--brand-primary,#1A73E8)]">
+                Total Working Time: {workingCalc.formatted} ({workingCalc.decimalHours} hrs)
+              </span>
+            </div>
+            <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${
+              workingCalc.isFullDay
+                ? 'bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)]'
+                : 'bg-[var(--badge-warning-bg,#FEF7E0)] text-[var(--badge-warning-text,#B06000)] border border-[var(--badge-warning-border,#FEEFC3)]'
+            }`}>
+              {workingCalc.isFullDay ? '✓ Standard Full Day Met (≥ 8.5h)' : `Short Day (${(8.5 - workingCalc.decimalHours).toFixed(2)}h under target)`}
+            </span>
+          </div>
+        ) : elapsedTime ? (
+          <div className="mb-6 p-4 rounded-2xl bg-[var(--badge-success-bg,#E6F4EA)]/60 border border-[var(--badge-success-border,#CEEAD6)] flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span className="text-xs font-semibold text-[var(--badge-success-text,#137333)]">
+                Active Session Elapsed: {elapsedTime.formatted}
+              </span>
+            </div>
+            <span className="text-[11px] text-[var(--text-secondary,#5F6368)]">
+              Punch out when leaving office to finalize verified work duration
+            </span>
+          </div>
+        ) : null}
+
+        {/* Stacked Task Lists using Point-by-Point Task Builder */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Planned Tasks */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-[var(--text-secondary,#5F6368)] uppercase tracking-wider">
-                Planned Tasks (For Today)
-              </h3>
-              <span className="text-[11px] text-[var(--text-muted,#747775)]">
-                {plannedTasks.length} committed
-              </span>
-            </div>
+          <TaskPointInput
+            label="Planned Tasks (For Today)"
+            sublabel="Log your planned agenda at check-in."
+            points={plannedTasks}
+            onChange={setPlannedTasks}
+            placeholder="Enter planned task (or paste list)..."
+            icon="pending"
+            disabled={isPunchedOut}
+          />
 
-            <div className="space-y-2">
-              {plannedTasks.map((task, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between p-3 rounded-xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)] text-sm text-[var(--text-primary,#1F1F1F)] group hover:border-[var(--border-focus,#BDC1C6)] transition-all"
-                >
-                  <span className="flex-1 pr-2">{task}</span>
-                  {!isPunchedOut && (
-                    <button
-                      onClick={() => removePlannedTask(idx)}
-                      className="text-[var(--text-secondary,#5F6368)] hover:text-[var(--badge-danger-text,#D93025)] transition-colors p-1 rounded-full hover:bg-[var(--badge-danger-bg,#FCE8E6)] cursor-pointer"
-                      aria-label="Remove planned task"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {!isPunchedOut && (
-              <div className="flex items-center gap-2 pt-2">
-                <input
-                  type="text"
-                  placeholder="Enter planned task..."
-                  value={newTaskInput}
-                  onChange={(e) => setNewTaskInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addPlannedTask()}
-                  className="flex-1 h-10 px-3.5 bg-[var(--bg-card,#FFFFFF)] text-xs rounded-full border border-[var(--border-card,#DADCE0)] text-[var(--text-primary,#1F1F1F)] placeholder:text-[var(--text-muted,#747775)] focus:outline-none focus:border-[var(--border-focus,#1A73E8)] focus:ring-2 focus:ring-[var(--brand-primary,#1A73E8)]/20"
-                />
-                <Button variant="secondary" size="sm" onClick={addPlannedTask} leftIcon={<Plus className="w-3.5 h-3.5" />}>
-                  Add task
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Completed Deliverables */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-[var(--text-secondary,#5F6368)] uppercase tracking-wider">
-                Completed Deliverables (At Logout)
-              </h3>
-              <span className="text-[11px] text-[var(--text-muted,#747775)]">
-                {completedTasks.length} completed
-              </span>
-            </div>
-
-            <div className="space-y-2">
-              {completedTasks.length === 0 ? (
-                <div className="p-4 rounded-xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-dashed border-[var(--border-card,#DADCE0)] text-center text-xs text-[var(--text-muted,#747775)]">
-                  {isPunchedIn
-                    ? 'Log your completed outputs before punching out.'
-                    : 'Punch in first to start tracking today’s achievements.'}
-                </div>
-              ) : (
-                completedTasks.map((task, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center gap-2 p-3 rounded-xl bg-[var(--badge-success-bg,#E6F4EA)] border border-[var(--badge-success-border,#CEEAD6)] text-sm text-[var(--badge-success-text,#137333)]"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-[var(--badge-success-text,#1E8E3E)] shrink-0" />
-                    <span>{task}</span>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {isPunchedIn && !isPunchedOut && (
-              <div className="flex items-center gap-2 pt-2">
-                <input
-                  type="text"
-                  placeholder="Enter deliverable completed..."
-                  value={completedTaskInput}
-                  onChange={(e) => setCompletedTaskInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addCompletedTask()}
-                  className="flex-1 h-10 px-3.5 bg-[var(--bg-card,#FFFFFF)] text-xs rounded-full border border-[var(--border-card,#DADCE0)] text-[var(--text-primary,#1F1F1F)] placeholder:text-[var(--text-muted,#747775)] focus:outline-none focus:border-[var(--border-focus,#1A73E8)] focus:ring-2 focus:ring-[var(--brand-primary,#1A73E8)]/20"
-                />
-                <Button variant="secondary" size="sm" onClick={addCompletedTask} leftIcon={<Plus className="w-3.5 h-3.5" />}>
-                  Log
-                </Button>
-              </div>
-            )}
-          </div>
+          <TaskPointInput
+            label="Completed Deliverables (At Logout)"
+            sublabel="Mark deliverables point-by-point at checkout."
+            points={completedTasks}
+            onChange={setCompletedTasks}
+            placeholder="Enter completed deliverable..."
+            icon="completed"
+            disabled={!loginTime || isPunchedOut}
+          />
         </div>
       </GlassPanel>
 
@@ -517,7 +452,9 @@ export default function EmployeeDashboardPage() {
                 <th className="py-3.5 px-4">Duration</th>
                 <th className="py-3.5 px-4">Fee Status</th>
                 <th className="py-3.5 px-4 text-center">Project</th>
-                <th className="py-3.5 px-4 text-center">Today's Mark</th>
+                <th className="py-3.5 px-4 text-center">
+                  Today&apos;s Mark ({liveDate.shortDay}, {liveDate.formattedDate})
+                </th>
                 <th className="py-3.5 px-4 text-center">Yesterday's Task</th>
               </tr>
             </thead>

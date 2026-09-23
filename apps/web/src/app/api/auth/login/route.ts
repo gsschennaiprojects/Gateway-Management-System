@@ -75,52 +75,7 @@ export async function POST(req: NextRequest) {
     const safeUser = stripSensitive(user);
     await setSessionCookie(safeUser);
 
-    // Record login attendance event to Firestore and Google Sheets
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    const dayStr = now.toLocaleDateString('en-US', { weekday: 'short' });
-    const attId = `ATT_${safeUser.id}_${todayStr.replace(/-/g, '')}`;
-
-    try {
-      await syncAttendanceToFirestore({
-        id: attId,
-        userId: safeUser.id,
-        userName: safeUser.name,
-        role: safeUser.role,
-        branch: safeUser.branch,
-        date: todayStr,
-        punchIn: timeStr,
-        status: 'Present'
-      });
-    } catch (fsAttErr) {
-      console.warn('[Login] Attendance firestore sync note:', fsAttErr);
-    }
-
-    try {
-      const branchCode = BRANCH_NAME_TO_CODE[safeUser.branch];
-      const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
-      if (spreadsheetId) {
-        // Attendance headers: ['Attendance_ID', 'Date', 'Day', 'Staff_ID', 'Staff_Name', 'Role', 'Check_In', 'Check_Out', 'Total_Hours', 'Status', 'Marked_By', 'Timestamp']
-        const { upsertStaffAttendanceRecord } = await import('@/lib/sheets/sheets-service');
-        await upsertStaffAttendanceRecord(spreadsheetId, [
-          attId,
-          todayStr,
-          dayStr,
-          safeUser.id,
-          safeUser.name,
-          safeUser.role,
-          timeStr,
-          '-',
-          '0',
-          'Present',
-          'Auto Login',
-          now.toISOString()
-        ]);
-      }
-    } catch (sheetAttErr) {
-      console.warn('[Login] Attendance sheets sync note:', sheetAttErr);
-    }
+    // Web authentication completed. Attendance is initiated explicitly by staff via the Punch In button.
 
     // Enterprise Audit Logging
     try {
@@ -143,9 +98,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       user: safeUser,
-      attendanceMarked: true,
-      attendanceStatus: 'Present',
-      punchInTime: timeStr
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Authentication failed';

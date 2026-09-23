@@ -1129,11 +1129,26 @@ function StudentManagementContent() {
                       <th className="py-2.5 px-3 border border-[#3B82F6]/30 text-center sticky left-[170px] z-20 bg-[#1E3A8A] min-w-[140px]">
                         Tracking Metric
                       </th>
-                      {currentWorkingDays.map(w => (
-                        <th key={w.date} className="py-2.5 px-2 border border-[#3B82F6]/30 text-center font-mono text-[10px] min-w-[85px]">
-                          {w.date}
-                        </th>
-                      ))}
+                      {currentWorkingDays.map(w => {
+                        const isToday = w.date === new Date().toISOString().slice(0, 10);
+                        return (
+                          <th
+                            key={w.date}
+                            className={`py-2 px-2 border text-center font-mono text-[10px] min-w-[85px] relative transition-all ${
+                              isToday
+                                ? 'bg-amber-500 text-slate-950 font-bold border-amber-300 ring-2 ring-amber-300 shadow-sm'
+                                : 'border-[#3B82F6]/30 text-white'
+                            }`}
+                          >
+                            {isToday && (
+                              <span className="inline-block text-[8px] uppercase tracking-wider font-extrabold bg-slate-950 text-amber-300 rounded px-1.5 py-0.5 mb-1 shadow-2xs">
+                                TODAY
+                              </span>
+                            )}
+                            <div>{w.date}</div>
+                          </th>
+                        );
+                      })}
                       <th className="py-2.5 px-2 border border-[#3B82F6]/30 text-center min-w-[90px] bg-[#172554]">Total Present</th>
                       <th className="py-2.5 px-2 border border-[#3B82F6]/30 text-center min-w-[90px] bg-[#172554]">Total Absent</th>
                       <th className="py-2.5 px-2 border border-[#3B82F6]/30 text-center min-w-[90px] bg-[#172554]">Attendance %</th>
@@ -1143,16 +1158,26 @@ function StudentManagementContent() {
 
                     <tr className="bg-[#2563EB] text-white font-medium text-[11px]">
                       <th className="py-1.5 px-3 border border-[#60A5FA]/30 text-center sticky left-0 z-20 bg-[#2563EB]">
-                        Domain & Individual Tenure
+                        Domain &amp; Individual Tenure
                       </th>
                       <th className="py-1.5 px-3 border border-[#60A5FA]/30 text-center sticky left-[170px] z-20 bg-[#2563EB]">
                         Daily Log Type
                       </th>
-                      {currentWorkingDays.map(w => (
-                        <th key={w.date} className="py-1.5 px-2 border border-[#60A5FA]/30 text-center text-[10px]">
-                          {w.day}
-                        </th>
-                      ))}
+                      {currentWorkingDays.map(w => {
+                        const isToday = w.date === new Date().toISOString().slice(0, 10);
+                        return (
+                          <th
+                            key={w.date}
+                            className={`py-1.5 px-2 border text-center text-[10px] font-semibold transition-all ${
+                              isToday
+                                ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                                : 'border-[#60A5FA]/30 text-white'
+                            }`}
+                          >
+                            {w.day}
+                          </th>
+                        );
+                      })}
                       <th className="py-1.5 px-2 border border-[#60A5FA]/30 text-center text-[10px] bg-[#1D4ED8]">Summary</th>
                       <th className="py-1.5 px-2 border border-[#60A5FA]/30 text-center text-[10px] bg-[#1D4ED8]">Summary</th>
                       <th className="py-1.5 px-2 border border-[#60A5FA]/30 text-center text-[10px] bg-[#1D4ED8]">Rate %</th>

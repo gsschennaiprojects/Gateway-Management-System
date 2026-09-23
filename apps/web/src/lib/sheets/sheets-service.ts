@@ -593,6 +593,65 @@ export async function upsertStaffAttendanceRecord(
 }
 
 /**
+ * Update an existing attendance record in 04_Staff_Attendance upon Punch Out / Logout.
+ * Sets Check_Out time, Total_Hours, and preserves the original Check_In time.
+ */
+export async function punchOutStaffAttendanceRecord(
+  spreadsheetId: string,
+  params: {
+    staffId: string;
+    staffName: string;
+    role: string;
+    date: string;
+    day: string;
+    checkOutTime: string;
+    totalHours: number | string;
+    markedBy?: string;
+  }
+): Promise<void> {
+  const tabName = COMMON_SHEET_NAMES.STAFF_ATTENDANCE;
+  const dateKey = params.date.replace(/-/g, '');
+  const attId = `ATT_${params.staffId}_${dateKey}`;
+
+  const existing = await findRow(spreadsheetId, tabName, 0, attId);
+  const nowIso = new Date().toISOString();
+
+  if (existing) {
+    const updatedValues = [...existing.data];
+    while (updatedValues.length < 12) updatedValues.push('');
+    
+    // Column 7: Check_Out
+    updatedValues[7] = params.checkOutTime;
+    // Column 8: Total_Hours
+    updatedValues[8] = String(params.totalHours);
+    // Column 9: Status
+    updatedValues[9] = 'Present';
+    // Column 10: Marked_By
+    updatedValues[10] = params.markedBy || 'Self (Punch Out)';
+    // Column 11: Timestamp
+    updatedValues[11] = nowIso;
+
+    await updateRow(spreadsheetId, tabName, existing.rowNumber, updatedValues, updatedValues.length);
+  } else {
+    const values = [
+      attId,
+      params.date,
+      params.day,
+      params.staffId,
+      params.staffName,
+      params.role,
+      params.checkOutTime,
+      params.checkOutTime,
+      String(params.totalHours),
+      'Present',
+      params.markedBy || 'Self (Punch Out)',
+      nowIso
+    ];
+    await appendRow(spreadsheetId, tabName, values);
+  }
+}
+
+/**
  * Append or update a staff member in 02_Staff_Directory.
  */
 export async function upsertStaffDirectory(
