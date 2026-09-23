@@ -23,6 +23,11 @@ import {
   isDateBefore,
   isDateAfter,
   COMMON_SHEET_NAMES,
+  STAFF_DIRECTORY_COLUMNS,
+  WORKLOG_COLUMNS,
+  STUDENT_COLUMNS,
+  TASK_COLUMNS,
+  ATTENDANCE_TRACKER_COLUMNS,
   type SheetType,
   type StudentTrackerItem,
   type AttendanceTrackerData,
@@ -38,7 +43,7 @@ let sheetsApiInstance: sheets_v4.Sheets | null = null;
 /**
  * Get or create the Google Sheets API client.
  */
-async function getSheetsApi(): Promise<sheets_v4.Sheets> {
+export async function getSheetsApi(): Promise<sheets_v4.Sheets> {
   if (sheetsApiInstance) return sheetsApiInstance;
 
   // First check if credentials are provided in an environment variable
@@ -56,9 +61,13 @@ async function getSheetsApi(): Promise<sheets_v4.Sheets> {
 
   // Try multiple paths for the service account key
   const possiblePaths = [
-    SERVICE_ACCOUNT_KEY_PATH,
     path.join(process.cwd(), 'management-system-509313-306faa5b0c5e.json'),
-    path.join(process.cwd(), '../../../management-system-509313-306faa5b0c5e.json'),
+    path.join(process.cwd(), '../management-system-509313-306faa5b0c5e.json'),
+    path.join(process.cwd(), '../../management-system-509313-306faa5b0c5e.json'),
+    path.join(process.cwd(), 'apps/web/management-system-509313-306faa5b0c5e.json'),
+    path.resolve(__dirname, '../../management-system-509313-306faa5b0c5e.json'),
+    path.resolve(__dirname, '../../../management-system-509313-306faa5b0c5e.json'),
+    SERVICE_ACCOUNT_KEY_PATH,
   ];
 
   let keyPath = '';
@@ -507,6 +516,219 @@ export async function appendAttendanceRecord(
   values: (string | number)[]
 ): Promise<void> {
   await appendRow(spreadsheetId, COMMON_SHEET_NAMES.STAFF_ATTENDANCE, values);
+}
+
+/**
+ * Append or update a staff member in 02_Staff_Directory.
+ */
+export async function upsertStaffDirectory(
+  spreadsheetId: string,
+  staff: {
+    staffId: string;
+    fullName: string;
+    role: string;
+    designation?: string;
+    department?: string;
+    email: string;
+    mobile?: string;
+    joiningDate?: string;
+    reportingManager?: string;
+    accountStatus?: string;
+    firebaseUid?: string;
+  }
+): Promise<void> {
+  const tabName = COMMON_SHEET_NAMES.STAFF_DIRECTORY;
+  const columns = STAFF_DIRECTORY_COLUMNS;
+  await ensureTabExists(spreadsheetId, tabName, columns);
+
+  const values = [
+    staff.staffId,
+    staff.fullName,
+    staff.role,
+    staff.designation || staff.role,
+    staff.department || 'Operations',
+    staff.email,
+    staff.mobile || '',
+    staff.joiningDate || new Date().toISOString().split('T')[0],
+    staff.reportingManager || 'Management',
+    staff.accountStatus || 'Active',
+    staff.firebaseUid || staff.staffId,
+    new Date().toISOString(),
+  ];
+
+  const existing = await findRow(spreadsheetId, tabName, 0, staff.staffId);
+  if (existing) {
+    await updateRow(spreadsheetId, tabName, existing.rowNumber, values, columns.length);
+  } else {
+    await appendRow(spreadsheetId, tabName, values);
+  }
+}
+
+/**
+ * Append or update a worklog entry in the master 03_Daily_Worklogs sheet.
+ */
+export async function appendBranchDailyWorklog(
+  spreadsheetId: string,
+  entry: {
+    logId: string;
+    staffId: string;
+    staffName: string;
+    role: string;
+    branchId: string;
+    date: string;
+    loginTime: string;
+    logoutTime: string;
+    tasksCompleted: string;
+    tasksPending: string;
+    incompleteReason?: string;
+    totalHours: number | string;
+    verifiedBy?: string;
+  }
+): Promise<void> {
+  const tabName = '03_Daily_Worklogs';
+  const headers = ['Log_ID', 'Staff_ID', 'Staff_Name', 'Role', 'Branch_ID', 'Date', 'Login_Time', 'Logout_Time', 'Tasks_Completed', 'Tasks_Pending', 'Incomplete_Reason', 'Total_Hours', 'Verified_By', 'Timestamp'];
+  await ensureTabExists(spreadsheetId, tabName, headers);
+  const values = [
+    entry.logId,
+    entry.staffId,
+    entry.staffName,
+    entry.role,
+    entry.branchId,
+    entry.date,
+    entry.loginTime,
+    entry.logoutTime,
+    entry.tasksCompleted,
+    entry.tasksPending,
+    entry.incompleteReason || '',
+    String(entry.totalHours),
+    entry.verifiedBy || 'Pending',
+    new Date().toISOString()
+  ];
+  await appendRow(spreadsheetId, tabName, values);
+}
+
+/**
+ * Append or update a task entry in the master 05_Task_Allocation sheet.
+ */
+export async function appendBranchTaskAllocation(
+  spreadsheetId: string,
+  task: {
+    taskId: string;
+    dateAssigned: string;
+    assignedById: string;
+    assignedByName: string;
+    assignedToId: string;
+    assignedToName: string;
+    taskTitle: string;
+    description: string;
+    priority: string;
+    category: string;
+    startDate: string;
+    dueDate: string;
+    completedDate: string;
+    status: string;
+    progressPct: string | number;
+    remarks: string;
+  }
+): Promise<void> {
+  const tabName = '05_Task_Allocation';
+  const headers = ['Task_ID', 'Date_Assigned', 'Assigned_By_ID', 'Assigned_By_Name', 'Assigned_To_ID', 'Assigned_To_Name', 'Task_Title', 'Description', 'Priority', 'Category', 'Start_Date', 'Due_Date', 'Completed_Date', 'Status', 'Progress_Pct', 'Remarks'];
+  await ensureTabExists(spreadsheetId, tabName, headers);
+  const values = [
+    task.taskId,
+    task.dateAssigned,
+    task.assignedById,
+    task.assignedByName,
+    task.assignedToId,
+    task.assignedToName,
+    task.taskTitle,
+    task.description,
+    task.priority,
+    task.category,
+    task.startDate,
+    task.dueDate,
+    task.completedDate,
+    task.status,
+    String(task.progressPct),
+    task.remarks
+  ];
+  const existing = await findRow(spreadsheetId, tabName, 0, task.taskId);
+  if (existing) {
+    await updateRow(spreadsheetId, tabName, existing.rowNumber, values, headers.length);
+  } else {
+    await appendRow(spreadsheetId, tabName, values);
+  }
+}
+
+/**
+ * Automatically create the 4 dedicated operational subsheets for any staff member in their branch spreadsheet:
+ * 1. WL_<Staff_ID> (Daily Worklogs)
+ * 2. STU_<Staff_ID> (Assigned Students)
+ * 3. TSK_<Staff_ID> (Task Allocation)
+ * 4. ATT_<Staff_ID> (Monthly Student Attendance & Progress Tracker)
+ */
+export async function createStaffSubsheets(
+  spreadsheetId: string,
+  staffId: string,
+  staffName?: string,
+  role?: string
+): Promise<{ success: boolean; createdTabs: string[] }> {
+  const wlTab = getWorklogTabName(staffId);
+  const stuTab = getStudentTabName(staffId);
+  const tskTab = getTaskTabName(staffId);
+  const attTab = getAttendanceTrackerTabName(staffId);
+
+  await ensureTabExists(spreadsheetId, wlTab, WORKLOG_COLUMNS);
+  await ensureTabExists(spreadsheetId, stuTab, STUDENT_COLUMNS);
+  await ensureTabExists(spreadsheetId, tskTab, TASK_COLUMNS);
+  await ensureTabExists(spreadsheetId, attTab, ATTENDANCE_TRACKER_COLUMNS);
+
+  return {
+    success: true,
+    createdTabs: [wlTab, stuTab, tskTab, attTab]
+  };
+}
+
+/**
+ * Delete staff subsheets (for testing cleanup or staff archival)
+ */
+export async function deleteStaffSubsheets(
+  spreadsheetId: string,
+  staffId: string
+): Promise<void> {
+  const api = await getSheetsApi();
+  const tabsToDelete = new Set([
+    getWorklogTabName(staffId),
+    getStudentTabName(staffId),
+    getTaskTabName(staffId),
+    getAttendanceTrackerTabName(staffId)
+  ]);
+
+  try {
+    const meta = await rateLimitedCall(
+      () => api.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties' }),
+      `check tabs for deletion`
+    );
+    const requests: sheets_v4.Schema$Request[] = [];
+    for (const s of meta.data.sheets || []) {
+      if (s.properties?.title && tabsToDelete.has(s.properties.title) && s.properties.sheetId !== undefined) {
+        requests.push({
+          deleteSheet: { sheetId: s.properties.sheetId }
+        });
+      }
+    }
+    if (requests.length > 0) {
+      await rateLimitedCall(
+        () => api.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: { requests }
+        }),
+        `delete staff subsheets ${staffId}`
+      );
+    }
+  } catch (err) {
+    console.warn(`[SheetsService] Note deleting tabs for ${staffId}:`, err);
+  }
 }
 
 export interface BranchStudentRow {

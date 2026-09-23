@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createUser, stripSensitive } from '@/lib/auth/user-store';
 import { setSessionCookie } from '@/lib/auth/session';
 import { RegisterPayload, BRANCHES, SPECIALIZATIONS } from '@/types/auth';
+import { syncUserToFirestore } from '@/lib/firebase/firebase-admin';
+import { upsertStaffDirectory } from '@/lib/sheets/sheets-service';
+import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export async function POST(req: NextRequest) {
   try {
@@ -70,6 +73,50 @@ export async function POST(req: NextRequest) {
       endDate,
       password
     });
+
+    // 1. Dual persistence: Sync to Firebase Firestore
+    try {
+      await syncUserToFirestore({
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        mobile: newUser.mobile,
+        role: newUser.role,
+        status: newUser.status,
+        branch: newUser.branch,
+        specialization: newUser.specialization,
+        specializations: newUser.specializations,
+        startMonthYear: newUser.startMonthYear,
+        startDate: newUser.startDate,
+        endDate: newUser.endDate,
+        createdAt: newUser.createdAt
+      });
+    } catch (fsErr) {
+      console.warn('[Register] Firestore sync note:', fsErr);
+    }
+
+    // 2. Dual persistence: Sync to Branch Google Sheet 02_Staff_Directory
+    try {
+      const branchCode = BRANCH_NAME_TO_CODE[newUser.branch];
+      const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
+      if (spreadsheetId) {
+        await upsertStaffDirectory(spreadsheetId, {
+          staffId: newUser.id,
+          fullName: newUser.name,
+          role: newUser.role,
+          designation: newUser.specialization || newUser.role,
+          department: 'Operations',
+          email: newUser.email,
+          mobile: newUser.mobile,
+          joiningDate: newUser.startDate || new Date().toISOString().split('T')[0],
+          reportingManager: 'Management',
+          accountStatus: 'Pending',
+          firebaseUid: newUser.id
+        });
+      }
+    } catch (sheetErr) {
+      console.warn('[Register] Google Sheets sync note:', sheetErr);
+    }
 
     const safeUser = stripSensitive(newUser);
     // Set session cookie with the new user in 'pending' status

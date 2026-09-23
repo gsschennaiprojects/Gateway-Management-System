@@ -19,6 +19,9 @@ dist/
 # Service account keys (keep local only)
 management-system-*.json
 client_secret_*.json
+*-adminsdk-*.json
+firebase-admin-key.json
+service-account*.json
 
 # Logs
 npm-debug.log*

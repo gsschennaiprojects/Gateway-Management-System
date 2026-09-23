@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getWorkLogs, getStaffMonthlySummary, addWorkLog } from '@/lib/worklogs/worklog-store';
 import { Branch } from '@/types/auth';
+import { syncWorklogToFirestore } from '@/lib/firebase/firebase-admin';
+import { upsertWorklog, appendBranchDailyWorklog } from '@/lib/sheets/sheets-service';
+import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -74,6 +77,64 @@ export async function POST(req: NextRequest) {
       attendanceStatus: body.attendanceStatus || 'present',
       hoursLogged: hours,
     });
+
+    // 1. Dual persistence: Sync to Firebase Firestore
+    try {
+      await syncWorklogToFirestore({
+        id: entry.id,
+        userId: entry.userId,
+        userName: entry.userName,
+        userRole: entry.userRole,
+        branch: entry.branch,
+        date: entry.date,
+        loginTime: entry.loginTime || '09:00 AM',
+        logoutTime: entry.logoutTime || '06:00 PM',
+        plannedTasks: entry.plannedTasks,
+        completedTasks: entry.completedTasks,
+        attendanceStatus: entry.attendanceStatus,
+        hoursLogged: entry.hoursLogged ?? 8.5
+      });
+    } catch (fsErr) {
+      console.warn('[Worklogs/POST] Firestore sync note:', fsErr);
+    }
+
+    // 2. Dual persistence: Sync to Google Sheets (Staff WL_<ID> tab + Master 03_Daily_Worklogs)
+    try {
+      const branchCode = BRANCH_NAME_TO_CODE[user.branch];
+      const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
+
+      if (spreadsheetId) {
+        // Staff personal operational subsheet WL_<ID>
+        await upsertWorklog(spreadsheetId, user.id, {
+          logId: entry.id,
+          date: entry.date,
+          loginTime: entry.loginTime || '09:00 AM',
+          logoutTime: entry.logoutTime || '06:00 PM',
+          tasksCompleted: completedTasks.join('; '),
+          tasksPending: plannedTasks.join('; '),
+          incompleteReason: '',
+          totalHours: String(entry.hoursLogged ?? 8.5),
+          verifiedBy: 'Pending'
+        });
+
+        // Master 03_Daily_Worklogs
+        await appendBranchDailyWorklog(spreadsheetId, {
+          logId: entry.id,
+          staffId: user.id,
+          staffName: user.name,
+          role: user.role,
+          branchId: branchCode,
+          date: entry.date,
+          loginTime: entry.loginTime || '09:00 AM',
+          logoutTime: entry.logoutTime || '06:00 PM',
+          tasksCompleted: completedTasks.join('; '),
+          tasksPending: plannedTasks.join('; '),
+          totalHours: entry.hoursLogged ?? 8.5
+        });
+      }
+    } catch (sheetErr) {
+      console.warn('[Worklogs/POST] Google Sheets sync note:', sheetErr);
+    }
 
     return NextResponse.json({ success: true, entry }, { status: 201 });
   } catch (err: unknown) {

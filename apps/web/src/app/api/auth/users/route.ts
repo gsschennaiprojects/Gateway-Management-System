@@ -10,6 +10,9 @@ import {
 } from '@/lib/auth/user-store';
 import { getSession } from '@/lib/auth/session';
 import { canManageTargetUser, canDeleteUser } from '@/lib/rbac/permissions';
+import { syncUserToFirestore, getAdminFirestore } from '@/lib/firebase/firebase-admin';
+import { upsertStaffDirectory, createStaffSubsheets, deleteStaffSubsheets } from '@/lib/sheets/sheets-service';
+import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -67,6 +70,56 @@ export async function PATCH(req: NextRequest) {
 
     if (action === 'update_status' && status) {
       const updated = updateUserStatus(userId, status);
+
+      // 1. Dual persistence: Sync to Firebase Firestore
+      try {
+        await syncUserToFirestore({
+          id: updated.id,
+          name: updated.name,
+          email: updated.email,
+          mobile: updated.mobile,
+          role: updated.role,
+          status: updated.status,
+          branch: updated.branch,
+          specialization: updated.specialization,
+          specializations: updated.specializations,
+          startMonthYear: updated.startMonthYear,
+          startDate: updated.startDate,
+          endDate: updated.endDate,
+          createdAt: updated.createdAt
+        });
+      } catch (fsErr) {
+        console.warn('[Users/PATCH] Firestore sync note:', fsErr);
+      }
+
+      // 2. Dual persistence: Sync to Google Sheets and auto-create 4 subsheets if approved
+      try {
+        const branchCode = BRANCH_NAME_TO_CODE[updated.branch];
+        const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
+        if (spreadsheetId) {
+          await upsertStaffDirectory(spreadsheetId, {
+            staffId: updated.id,
+            fullName: updated.name,
+            role: updated.role,
+            designation: updated.specialization || updated.role,
+            department: 'Operations',
+            email: updated.email,
+            mobile: updated.mobile,
+            joiningDate: updated.startDate || new Date().toISOString().split('T')[0],
+            reportingManager: 'Management',
+            accountStatus: status === 'active' ? 'Active' : status === 'rejected' ? 'Rejected' : 'Pending',
+            firebaseUid: updated.id
+          });
+
+          // Create the 4 allocated subsheets (WL_<ID>, STU_<ID>, TSK_<ID>, ATT_<ID>) on branch sheet
+          if (status === 'active') {
+            await createStaffSubsheets(spreadsheetId, updated.id, updated.name, updated.role);
+          }
+        }
+      } catch (sheetErr) {
+        console.warn('[Users/PATCH] Google Sheets sync note:', sheetErr);
+      }
+
       return NextResponse.json({ success: true, user: stripSensitive(updated) });
     }
 
@@ -81,6 +134,28 @@ export async function PATCH(req: NextRequest) {
       }
 
       const updated = updateUserRole(userId, role);
+
+      // Sync updated role to Firestore
+      try {
+        await syncUserToFirestore({
+          id: updated.id,
+          name: updated.name,
+          email: updated.email,
+          mobile: updated.mobile,
+          role: updated.role,
+          status: updated.status,
+          branch: updated.branch,
+          specialization: updated.specialization,
+          specializations: updated.specializations,
+          startMonthYear: updated.startMonthYear,
+          startDate: updated.startDate,
+          endDate: updated.endDate,
+          createdAt: updated.createdAt
+        });
+      } catch (fsErr) {
+        console.warn('[Users/PATCH] Role Firestore sync note:', fsErr);
+      }
+
       return NextResponse.json({ success: true, user: stripSensitive(updated) });
     }
 
@@ -104,6 +179,28 @@ export async function PATCH(req: NextRequest) {
         );
       }
       const deleted = deleteUser(userId);
+
+      // Clean up Firestore doc
+      try {
+        const db = getAdminFirestore();
+        if (db) {
+          await db.collection('users').doc(userId).delete();
+        }
+      } catch (fsErr) {
+        console.warn('[Users/DELETE] Firestore doc delete note:', fsErr);
+      }
+
+      // Clean up Google Sheets subsheets
+      try {
+        const branchCode = BRANCH_NAME_TO_CODE[target.branch];
+        const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
+        if (spreadsheetId) {
+          await deleteStaffSubsheets(spreadsheetId, target.id);
+        }
+      } catch (sheetErr) {
+        console.warn('[Users/DELETE] Subsheet delete note:', sheetErr);
+      }
+
       return NextResponse.json({ success: deleted });
     }
 

@@ -40,6 +40,12 @@ import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches
 import { serverCache } from '@/lib/cache/memory-cache';
 
 import { getSession as getAuthSession } from '@/lib/auth/session';
+import {
+  syncStudentToFirestore,
+  syncTaskToFirestore,
+  syncWorklogToFirestore,
+  syncAttendanceToFirestore
+} from '@/lib/firebase/firebase-admin';
 
 // ─── Auth Helper ───────────────────────────────────────────────────────────────
 
@@ -334,6 +340,27 @@ export async function POST(request: NextRequest) {
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         await upsertWorklog(spreadsheetId, staffId, data as WorklogRow);
         serverCache.invalidate(`worklog:${branchCode}:${staffId}`);
+
+        try {
+          const w = data as WorklogRow;
+          await syncWorklogToFirestore({
+            id: w.logId || `WL_${staffId}_${Date.now()}`,
+            userId: staffId,
+            userName: staffId,
+            userRole: session.role,
+            branch: branchCode,
+            date: w.date,
+            loginTime: w.loginTime || '09:00 AM',
+            logoutTime: w.logoutTime || '06:00 PM',
+            plannedTasks: w.tasksPending ? [w.tasksPending] : [],
+            completedTasks: w.tasksCompleted ? [w.tasksCompleted] : [],
+            attendanceStatus: 'present',
+            hoursLogged: parseFloat(w.totalHours) || 8.5
+          });
+        } catch (fsErr) {
+          console.warn('[Sheets/POST/worklog] Firestore sync note:', fsErr);
+        }
+
         return NextResponse.json({ success: true, message: 'Worklog saved.' });
       }
 
@@ -343,6 +370,32 @@ export async function POST(request: NextRequest) {
         await upsertStudent(spreadsheetId, staffId, data as StudentRow);
         serverCache.invalidate(`student:${branchCode}:${staffId}`);
         serverCache.invalidate(`branch_student_directory:${branchCode}`);
+
+        try {
+          const s = data as StudentRow;
+          await syncStudentToFirestore({
+            studentId: s.studentId,
+            studentName: s.studentName,
+            branch: branchCode,
+            college: s.college,
+            department: s.department,
+            year: s.year,
+            email: s.email,
+            mobile: s.mobile,
+            course: s.course,
+            domain: s.domain,
+            mentorStaffId: staffId,
+            mentorName: staffId,
+            admissionDate: s.admissionDate,
+            endDate: s.endDate,
+            feeStatus: s.feeStatus,
+            projectStatus: s.projectStatus,
+            studentStatus: s.studentStatus
+          });
+        } catch (fsErr) {
+          console.warn('[Sheets/POST/student] Firestore sync note:', fsErr);
+        }
+
         return NextResponse.json({ success: true, message: 'Student record saved.' });
       }
 
@@ -352,6 +405,32 @@ export async function POST(request: NextRequest) {
         }
         await upsertBranchStudent(spreadsheetId, data as BranchStudentRow);
         serverCache.invalidate(`branch_student_directory:${branchCode}`);
+
+        try {
+          const b = data as BranchStudentRow;
+          await syncStudentToFirestore({
+            studentId: b.studentId,
+            studentName: b.studentName,
+            branch: branchCode,
+            college: b.college,
+            department: b.department,
+            year: b.year,
+            email: b.email,
+            mobile: b.mobile,
+            course: b.course,
+            domain: b.domain,
+            mentorStaffId: b.mentorStaffId,
+            mentorName: b.mentorName,
+            admissionDate: b.admissionDate,
+            endDate: b.endDate,
+            feeStatus: b.feeStatus,
+            projectStatus: b.projectStatus,
+            studentStatus: b.studentStatus
+          });
+        } catch (fsErr) {
+          console.warn('[Sheets/POST/branch_student_directory] Firestore sync note:', fsErr);
+        }
+
         return NextResponse.json({ success: true, message: 'Branch student record saved.' });
       }
 
@@ -360,6 +439,25 @@ export async function POST(request: NextRequest) {
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         await upsertTask(spreadsheetId, staffId, data as TaskRow);
         serverCache.invalidate(`task:${branchCode}:${staffId}`);
+
+        try {
+          const t = data as TaskRow;
+          await syncTaskToFirestore({
+            id: t.taskId,
+            title: t.taskTitle,
+            description: t.description,
+            assignedBy: { id: t.assignedById, name: t.assignedByName },
+            targetType: 'individual',
+            targetUserId: staffId,
+            priority: t.priority,
+            dueDate: t.dueDate,
+            status: t.status,
+            createdAt: t.dateAssigned || new Date().toISOString()
+          });
+        } catch (fsErr) {
+          console.warn('[Sheets/POST/task] Firestore sync note:', fsErr);
+        }
+
         return NextResponse.json({ success: true, message: 'Task saved.' });
       }
 

@@ -42,3 +42,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Service account keys (keep local only)
+management-system-*.json
+client_secret_*.json
+*-adminsdk-*.json
+firebase-admin-key.json
+service-account*.json
