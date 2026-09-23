@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, stripSensitive } from '@/lib/auth/user-store';
+import { createUser, stripSensitive, findUserByIdentifier } from '@/lib/auth/user-store';
 import { setSessionCookie } from '@/lib/auth/session';
 import { RegisterPayload, BRANCHES, SPECIALIZATIONS } from '@/types/auth';
 import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
@@ -7,6 +7,7 @@ import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  let requestEmail = '';
   try {
     const body = await req.json();
     const {
@@ -22,6 +23,7 @@ export async function POST(req: NextRequest) {
       endDate,
       password
     } = body as RegisterPayload;
+    requestEmail = email?.trim()?.toLowerCase() || '';
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'Full name is required' }, { status: 400 });
@@ -60,9 +62,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = cleanMobile.slice(-10);
+
+    // 1. Check in-memory user store
+    const existingInMem = findUserByIdentifier(cleanEmail) || findUserByIdentifier(cleanPhone);
+    if (existingInMem) {
+      return NextResponse.json({
+        error: 'An account with this Gmail address already exists. Redirecting to sign in...',
+        alreadyExists: true,
+        email: cleanEmail
+      }, { status: 409 });
+    }
+
+    // 2. Check Firestore collection directly for email/gmail/mobile
+    try {
+      const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
+      const db = getAdminFirestore();
+      if (db) {
+        let snap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
+        if (snap.empty) {
+          snap = await db.collection('users').where('gmail', '==', cleanEmail).limit(1).get();
+        }
+        if (snap.empty && cleanPhone.length >= 10) {
+          snap = await db.collection('users').where('mobile', '==', cleanPhone).limit(1).get();
+        }
+        if (!snap.empty) {
+          return NextResponse.json({
+            error: 'An account with this Gmail address already exists. Redirecting to sign in...',
+            alreadyExists: true,
+            email: cleanEmail
+          }, { status: 409 });
+        }
+      }
+    } catch (fsErr) {
+      console.warn('[Register] Firestore duplicate check note:', fsErr);
+    }
+
     const newUser = createUser({
       name,
-      email,
+      email: cleanEmail,
       mobile: cleanMobile,
       requestedRole: requestedRole || 'intern',
       branch,
@@ -74,35 +113,37 @@ export async function POST(req: NextRequest) {
       password
     });
 
-    // Dual persistence: Sync to Firebase Firestore & Google Sheets in background (non-blocking)
-    (async () => {
-      try {
-        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
-        await syncUserToFirestore({
-          id: newUser.id,
-          name: newUser.name,
-          email: newUser.email,
-          mobile: newUser.mobile,
-          role: newUser.role,
-          status: newUser.status,
-          branch: newUser.branch,
-          specialization: newUser.specialization,
-          specializations: newUser.specializations,
-          startMonthYear: newUser.startMonthYear,
-          startDate: newUser.startDate,
-          endDate: newUser.endDate,
-          createdAt: newUser.createdAt
-        });
-      } catch (fsErr) {
-        console.warn('[Register] Firestore sync note:', fsErr);
-      }
+    // 3. AWAIT Firestore persistence directly so serverless execution environment does not terminate before write
+    try {
+      const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
+      await syncUserToFirestore({
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        mobile: newUser.mobile,
+        role: newUser.role,
+        status: newUser.status,
+        branch: newUser.branch,
+        specialization: newUser.specialization,
+        specializations: newUser.specializations,
+        startMonthYear: newUser.startMonthYear,
+        startDate: newUser.startDate,
+        endDate: newUser.endDate,
+        password: password,
+        createdAt: newUser.createdAt
+      });
+    } catch (fsErr) {
+      console.warn('[Register] Firestore sync note:', fsErr);
+    }
 
-      try {
-        const branchCode = BRANCH_NAME_TO_CODE[newUser.branch];
-        const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
-        if (spreadsheetId) {
-          const { upsertStaffDirectory } = await import('@/lib/sheets/sheets-service');
-          await upsertStaffDirectory(spreadsheetId, {
+    // 4. Google Sheets directory sync (with timeout protection)
+    try {
+      const branchCode = BRANCH_NAME_TO_CODE[newUser.branch];
+      const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
+      if (spreadsheetId) {
+        const { upsertStaffDirectory } = await import('@/lib/sheets/sheets-service');
+        await Promise.race([
+          upsertStaffDirectory(spreadsheetId, {
             staffId: newUser.id,
             fullName: newUser.name,
             role: newUser.role,
@@ -114,12 +155,13 @@ export async function POST(req: NextRequest) {
             reportingManager: 'Management',
             accountStatus: 'Pending',
             firebaseUid: newUser.id
-          });
-        }
-      } catch (sheetErr) {
-        console.warn('[Register] Google Sheets sync note:', sheetErr);
+          }),
+          new Promise((resolve) => setTimeout(resolve, 3000))
+        ]);
       }
-    })().catch((err) => console.warn('[Register] Background sync error:', err));
+    } catch (sheetErr) {
+      console.warn('[Register] Google Sheets sync note:', sheetErr);
+    }
 
     const safeUser = stripSensitive(newUser);
     // Set session cookie with the new user in 'pending' status
@@ -131,6 +173,13 @@ export async function POST(req: NextRequest) {
       user: safeUser
     });
   } catch (err: unknown) {
+    if (err instanceof Error && err.message.toLowerCase().includes('already exists')) {
+      return NextResponse.json({
+        error: 'An account with this Gmail address already exists. Redirecting to sign in...',
+        alreadyExists: true,
+        email: requestEmail
+      }, { status: 409 });
+    }
     const message = err instanceof Error ? err.message : 'Registration failed';
     return NextResponse.json({ error: message }, { status: 400 });
   }

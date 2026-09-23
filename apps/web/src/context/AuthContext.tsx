@@ -8,7 +8,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string; user?: User }>;
-  register: (payload: RegisterPayload) => Promise<{ success: boolean; error?: string; user?: User }>;
+  register: (payload: RegisterPayload) => Promise<{ success: boolean; error?: string; user?: User; alreadyExists?: boolean; email?: string }>;
   logout: () => Promise<void>;
   quickLogin: (identifier: string) => Promise<boolean>;
   refreshSession: () => Promise<void>;
@@ -111,7 +111,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!res.ok) {
-        return { success: false, error: data.error || `Registration failed (${res.status})` };
+        return {
+          success: false,
+          error: data.error || `Registration failed (${res.status})`,
+          alreadyExists: data.alreadyExists,
+          email: data.email
+        };
       }
 
       setUser(data.user);

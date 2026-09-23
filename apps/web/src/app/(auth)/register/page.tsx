@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/context/AuthContext';
@@ -29,6 +30,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 
 export default function RegisterPage() {
+  const router = useRouter();
   const { register } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [name, setName] = useState('');
@@ -137,7 +139,15 @@ export default function RegisterPage() {
     setIsSubmitting(false);
 
     if (!result.success) {
-      setError(result.error || 'Registration failed. Please try again.');
+      if (result.alreadyExists) {
+        const redirectEmail = result.email || email.trim();
+        setError(result.error || 'An account with this Gmail address already exists. Redirecting to sign in...');
+        setTimeout(() => {
+          router.push(`/login?email=${encodeURIComponent(redirectEmail)}`);
+        }, 1200);
+      } else {
+        setError(result.error || 'Registration failed. Please try again.');
+      }
     }
   };
 

@@ -1,25 +1,40 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { BrandLogo } from '@/components/ui/BrandLogo';
-import { Mail, Lock, ArrowRight, AlertCircle, ShieldCheck, Sun, Moon, Eye } from 'lucide-react';
+import { Mail, Lock, AlertCircle, Sun, Moon, Eye, Info } from 'lucide-react';
 
-export default function LoginPage() {
-  const { login, quickLogin, loading: authLoading } = useAuth();
+function LoginForm() {
+  const { login, loading: authLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const [identifier, setIdentifier] = useState('');
+  const searchParams = useSearchParams();
+  const emailParam = searchParams.get('email') || '';
+
+  const [identifier, setIdentifier] = useState(emailParam);
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(
+    emailParam ? `An account with this Gmail address already exists. Please enter your password to sign in.` : null
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (emailParam) {
+      setIdentifier(emailParam);
+      setInfoMessage(`An account with this Gmail address already exists. Please enter your password to sign in.`);
+    }
+  }, [emailParam]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setInfoMessage(null);
 
     if (!identifier.trim()) {
       setError('Please enter your Gmail address or 10-digit mobile number.');
@@ -73,6 +88,13 @@ export default function LoginPage() {
             to continue to <strong className="font-semibold text-[var(--text-primary)]">GSS Management</strong>
           </p>
         </div>
+
+        {infoMessage && (
+          <div className="mb-6 p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-start gap-2.5 text-xs text-blue-500">
+            <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+            <span className="leading-relaxed">{infoMessage}</span>
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 p-3.5 rounded-xl bg-[var(--badge-danger-bg)] border border-[var(--badge-danger-border)] flex items-start gap-2.5 text-xs text-[var(--badge-danger-text)]">
@@ -147,5 +169,15 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="w-full max-w-[460px] animate-pulse bg-[var(--bg-card)] rounded-3xl p-8 h-[400px]" />
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }

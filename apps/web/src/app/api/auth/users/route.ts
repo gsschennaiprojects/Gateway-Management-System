@@ -25,17 +25,40 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  // Super Admin can view all branches or filter by branch via query param
-  if (session.user.role === 'superadmin') {
-    const { searchParams } = new URL(req.url);
-    const branchParam = searchParams.get('branch');
-    const all = branchParam ? getUsersByBranch(branchParam as any) : getAllUsers();
-    return NextResponse.json({ users: all.map(stripSensitive) });
+  // Fetch all users from Firestore to merge with in-memory users
+  let firestoreUsers: any[] = [];
+  try {
+    const { getFirestoreUsers } = await import('@/lib/firebase/firebase-admin');
+    firestoreUsers = await getFirestoreUsers();
+  } catch (fsErr) {
+    console.warn('[Users/GET] Firestore load note:', fsErr);
   }
 
-  // Admin and HR have strictly scoped access to their OWN branch per requirement:
-  // "the admin have only ccess to see the employee and their sudent detail in their branch"
-  const branchUsers = getUsersByBranch(session.user.branch);
+  // Deduplicate and combine users
+  const userMap = new Map<string, any>();
+  for (const u of getAllUsers()) {
+    userMap.set(u.id, u);
+    if (u.email) userMap.set(u.email.toLowerCase(), u);
+  }
+  for (const fu of firestoreUsers) {
+    userMap.set(fu.id, fu);
+    if (fu.email) userMap.set(fu.email.toLowerCase(), fu);
+  }
+  const allUsers = Array.from(new Set(userMap.values()));
+
+  const { searchParams } = new URL(req.url);
+  const branchParam = searchParams.get('branch');
+
+  // Super Admin can view all branches or filter by branch via query param
+  if (session.user.role === 'superadmin') {
+    const filtered = (branchParam && branchParam !== 'All' && branchParam !== 'all')
+      ? allUsers.filter(u => u.branch === branchParam)
+      : allUsers;
+    return NextResponse.json({ users: filtered.map(stripSensitive) });
+  }
+
+  // Admin and HR have strictly scoped access to their OWN branch
+  const branchUsers = allUsers.filter(u => u.branch === session.user.branch);
   return NextResponse.json({ users: branchUsers.map(stripSensitive) });
 }
 
@@ -46,7 +69,6 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Only Super Admin and Admin can approve, reject, or assign/change roles
-  // "the super admin and admin(only for heir branch) want perissionon for assign and chang roles"
   if (!['superadmin', 'admin'].includes(session.user.role)) {
     return NextResponse.json({ error: 'Forbidden: Insufficient privileges' }, { status: 403 });
   }
@@ -55,7 +77,33 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const { userId, action, status, role } = body;
 
-    const target = findUserById(userId);
+    let target = findUserById(userId);
+    if (!target) {
+      try {
+        const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
+        const db = getAdminFirestore();
+        if (db) {
+          const docSnap = await db.collection('users').doc(userId).get();
+          if (docSnap.exists) {
+            const d = docSnap.data();
+            target = {
+              id: docSnap.id,
+              name: d?.name || 'Staff Member',
+              email: d?.email || d?.gmail || '',
+              mobile: d?.mobile || '',
+              role: d?.role || 'intern',
+              status: d?.status || 'pending',
+              branch: d?.branch || 'Coimbatore',
+              specialization: d?.specialization || 'Operations',
+              createdAt: d?.createdAt || new Date().toISOString()
+            } as any;
+          }
+        }
+      } catch (err) {
+        console.warn('[Users/PATCH] Target lookup in Firestore note:', err);
+      }
+    }
+
     if (!target) {
       return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
     }
@@ -69,7 +117,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (action === 'update_status' && status) {
-      const updated = updateUserStatus(userId, status);
+      const updated = updateUserStatus(userId, status, target);
 
       // 1. Dual persistence: Sync to Firebase Firestore
       try {
@@ -154,7 +202,7 @@ export async function PATCH(req: NextRequest) {
         );
       }
 
-      const updated = updateUserRole(userId, role);
+      const updated = updateUserRole(userId, role, target);
 
       // Sync updated role to Firestore
       try {
@@ -202,13 +250,10 @@ export async function PATCH(req: NextRequest) {
       }
       const deleted = deleteUser(userId);
 
-      // Clean up Firestore doc
+      // Clean up Firestore doc completely (by ID, email, gmail, mobile)
       try {
-        const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
-        const db = getAdminFirestore();
-        if (db) {
-          await db.collection('users').doc(userId).delete();
-        }
+        const { deleteUserFromFirestore } = await import('@/lib/firebase/firebase-admin');
+        await deleteUserFromFirestore(userId, target.email, target.mobile);
       } catch (fsErr) {
         console.warn('[Users/DELETE] Firestore doc delete note:', fsErr);
       }

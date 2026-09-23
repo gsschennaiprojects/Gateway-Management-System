@@ -68,8 +68,22 @@ export function createUser(payload: RegisterPayload): StoredUser {
   return newUser;
 }
 
-export function updateUserStatus(userId: string, status: 'active' | 'rejected'): StoredUser {
-  const user = findUserById(userId);
+export function upsertServerUser(user: StoredUser): StoredUser {
+  const index = serverUsers.findIndex((u) => u.id === user.id);
+  if (index !== -1) {
+    serverUsers[index] = { ...serverUsers[index], ...user };
+    return serverUsers[index];
+  } else {
+    serverUsers.push(user);
+    return user;
+  }
+}
+
+export function updateUserStatus(userId: string, status: 'active' | 'rejected', fallbackUser?: StoredUser): StoredUser {
+  let user = findUserById(userId);
+  if (!user && fallbackUser) {
+    user = upsertServerUser(fallbackUser);
+  }
   if (!user) {
     throw new Error('User not found');
   }
@@ -77,8 +91,11 @@ export function updateUserStatus(userId: string, status: 'active' | 'rejected'):
   return user;
 }
 
-export function updateUserRole(userId: string, role: StoredUser['role']): StoredUser {
-  const user = findUserById(userId);
+export function updateUserRole(userId: string, role: StoredUser['role'], fallbackUser?: StoredUser): StoredUser {
+  let user = findUserById(userId);
+  if (!user && fallbackUser) {
+    user = upsertServerUser(fallbackUser);
+  }
   if (!user) {
     throw new Error('User not found');
   }
@@ -88,8 +105,9 @@ export function updateUserRole(userId: string, role: StoredUser['role']): Stored
 
 export function deleteUser(userId: string): boolean {
   const index = serverUsers.findIndex((u) => u.id === userId);
-  if (index === -1) return false;
-  serverUsers.splice(index, 1);
+  if (index !== -1) {
+    serverUsers.splice(index, 1);
+  }
   return true;
 }
 
