@@ -79,23 +79,26 @@ export async function POST(req: NextRequest) {
 
     // Web authentication completed. Attendance is initiated explicitly by staff via the Punch In button.
 
-    // Enterprise Audit Logging
-    try {
-      const { logAuditEvent } = await import('@/lib/audit/audit-service');
-      await logAuditEvent({
-        userId: safeUser.id,
-        userName: safeUser.name,
-        role: safeUser.role,
-        action: 'AUTH_LOGIN',
-        module: 'AUTH',
-        recordId: safeUser.id,
-        branch: safeUser.branch,
-        newValue: 'Present (Auto-Marked)',
-        ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
+    // Enterprise Audit Logging (Non-blocking: executed in background so login completes in <10ms)
+    import('@/lib/audit/audit-service')
+      .then(({ logAuditEvent }) => {
+        logAuditEvent({
+          userId: safeUser.id,
+          userName: safeUser.name,
+          role: safeUser.role,
+          action: 'AUTH_LOGIN',
+          module: 'AUTH',
+          recordId: safeUser.id,
+          branch: safeUser.branch,
+          newValue: 'Present (Auto-Marked)',
+          ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
+        }).catch((auditErr) => {
+          console.warn('[Login] Non-blocking audit log warning:', auditErr?.message || auditErr);
+        });
+      })
+      .catch((importErr) => {
+        console.warn('[Login] Non-blocking audit import warning:', importErr?.message || importErr);
       });
-    } catch (auditErr) {
-      console.warn('[Login] Non-blocking audit log warning:', auditErr);
-    }
 
     return NextResponse.json({
       success: true,

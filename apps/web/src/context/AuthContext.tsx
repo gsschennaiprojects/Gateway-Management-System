@@ -50,9 +50,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify(credentials)
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: `Server returned an invalid response (${res.status})` };
+      }
+
       if (!res.ok) {
-        return { success: false, error: data.error || 'Failed to sign in' };
+        return { success: false, error: data.error || `Failed to sign in (${res.status})` };
       }
 
       setUser(data.user);
