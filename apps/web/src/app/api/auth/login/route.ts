@@ -121,6 +121,24 @@ export async function POST(req: NextRequest) {
       console.warn('[Login] Attendance sheets sync note:', sheetAttErr);
     }
 
+    // Enterprise Audit Logging
+    try {
+      const { logAuditEvent } = await import('@/lib/audit/audit-service');
+      await logAuditEvent({
+        userId: safeUser.id,
+        userName: safeUser.name,
+        role: safeUser.role,
+        action: 'AUTH_LOGIN',
+        module: 'AUTH',
+        recordId: safeUser.id,
+        branch: safeUser.branch,
+        newValue: 'Session Active',
+        ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
+      });
+    } catch (auditErr) {
+      console.warn('[Login] Non-blocking audit log warning:', auditErr);
+    }
+
     return NextResponse.json({
       success: true,
       user: safeUser

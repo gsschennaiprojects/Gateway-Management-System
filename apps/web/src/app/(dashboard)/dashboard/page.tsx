@@ -5,8 +5,8 @@ import { GlassPanel } from '@/components/ui/GlassPanel';
 import { AttendanceGauge } from '@/components/ui/AttendanceGauge';
 import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/StatusChip';
-import { Input } from '@/components/ui/Input';
 import { useAuth } from '@/context/AuthContext';
+import { SmartAlertsBanner } from '@/components/dashboard/SmartAlertsBanner';
 import { AssignedTask, TaskStatus } from '@/types/task';
 import Link from 'next/link';
 import {
@@ -183,6 +183,9 @@ export default function EmployeeDashboardPage() {
           </span>
         </div>
       </div>
+
+      {/* Smart Proactive Operational Alerts Banner */}
+      <SmartAlertsBanner />
 
       {/* Hero Attendance Gauge Section */}
       <div className="w-full">

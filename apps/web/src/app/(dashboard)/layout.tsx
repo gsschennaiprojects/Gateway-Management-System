@@ -10,6 +10,7 @@ import { GoogleAppsLauncher } from '@/components/layout/GoogleAppsLauncher';
 import { GoogleProfileMenu } from '@/components/layout/GoogleProfileMenu';
 import { GoogleHeaderSearchBar } from '@/components/layout/GoogleHeaderSearchBar';
 import { ThemeSelector } from '@/components/ui/ThemeSelector';
+import { SyncStatusPill } from '@/components/ui/SyncStatusPill';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { Loader2, HelpCircle, MapPin } from 'lucide-react';
 
@@ -98,6 +99,9 @@ export default function DashboardLayout({
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {/* Multi-Theme Selector (Light, Dark, Eye Protection) */}
             <ThemeSelector />
+
+            {/* Real-time Persistence & Cloud Sync Status Pill */}
+            <SyncStatusPill />
 
             {/* Help Button */}
             <button

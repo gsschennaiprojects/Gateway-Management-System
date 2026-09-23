@@ -120,6 +120,25 @@ export async function PATCH(req: NextRequest) {
         console.warn('[Users/PATCH] Google Sheets sync note:', sheetErr);
       }
 
+      // Enterprise Audit Logging
+      try {
+        const { logAuditEvent } = await import('@/lib/audit/audit-service');
+        await logAuditEvent({
+          userId: session.user.id,
+          userName: session.user.name,
+          role: session.user.role,
+          action: status === 'active' ? 'USER_APPROVED' : status === 'rejected' ? 'USER_REJECTED' : 'USER_STATUS_UPDATED',
+          module: 'STAFF',
+          recordId: updated.id,
+          branch: updated.branch,
+          oldValue: target.status,
+          newValue: status,
+          ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
+        });
+      } catch (auditErr) {
+        console.warn('[Users/PATCH] Non-blocking audit log warning:', auditErr);
+      }
+
       return NextResponse.json({ success: true, user: stripSensitive(updated) });
     }
 

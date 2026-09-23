@@ -16,7 +16,8 @@ export type Permission =
   | 'view_work_logs'
   | 'download_individual_reports'
   | 'view_reports'
-  | 'export_reports';
+  | 'export_reports'
+  | 'view_audit_logs';
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   superadmin: [
@@ -35,7 +36,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view_work_logs',
     'download_individual_reports',
     'view_reports',
-    'export_reports'
+    'export_reports',
+    'view_audit_logs'
   ],
   admin: [
     'view_employee_dashboard',
@@ -51,7 +53,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view_work_logs', // for Employee, Intern in their branch
     'download_individual_reports',
     'view_reports',
-    'export_reports'
+    'export_reports',
+    'view_audit_logs'
   ],
   hr: [
     'view_employee_directory',

@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSession, clearSessionCookie } from '@/lib/auth/session';
 import { syncAttendanceToFirestore } from '@/lib/firebase/firebase-admin';
 import { appendAttendanceRecord } from '@/lib/sheets/sheets-service';
 import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (session?.user) {
@@ -51,6 +51,24 @@ export async function POST() {
         }
       } catch (sheetErr) {
         console.warn('[Logout] Attendance Sheets sync note:', sheetErr);
+      }
+
+      // Enterprise Audit Logging
+      try {
+        const { logAuditEvent } = await import('@/lib/audit/audit-service');
+        await logAuditEvent({
+          userId: user.id,
+          userName: user.name,
+          role: user.role,
+          action: 'AUTH_LOGOUT',
+          module: 'AUTH',
+          recordId: user.id,
+          branch: user.branch,
+          newValue: 'Logged Out',
+          ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
+        });
+      } catch (auditErr) {
+        console.warn('[Logout] Non-blocking audit log warning:', auditErr);
       }
     }
   } catch (e) {
