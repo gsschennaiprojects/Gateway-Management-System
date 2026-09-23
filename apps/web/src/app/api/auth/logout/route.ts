@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, clearSessionCookie } from '@/lib/auth/session';
-import { syncAttendanceToFirestore } from '@/lib/firebase/firebase-admin';
-import { appendAttendanceRecord } from '@/lib/sheets/sheets-service';
 import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +20,7 @@ export async function POST(req: NextRequest) {
       // Background tasks (non-blocking for instant logout response)
       (async () => {
         try {
+          const { syncAttendanceToFirestore } = await import('@/lib/firebase/firebase-admin');
           await syncAttendanceToFirestore({
             id: attId,
             userId: user.id,

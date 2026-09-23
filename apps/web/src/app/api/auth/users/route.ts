@@ -10,8 +10,6 @@ import {
 } from '@/lib/auth/user-store';
 import { getSession } from '@/lib/auth/session';
 import { canManageTargetUser, canDeleteUser } from '@/lib/rbac/permissions';
-import { syncUserToFirestore, getAdminFirestore } from '@/lib/firebase/firebase-admin';
-import { upsertStaffDirectory, createStaffSubsheets, deleteStaffSubsheets } from '@/lib/sheets/sheets-service';
 import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export const dynamic = 'force-dynamic';
@@ -75,6 +73,7 @@ export async function PATCH(req: NextRequest) {
 
       // 1. Dual persistence: Sync to Firebase Firestore
       try {
+        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
         await syncUserToFirestore({
           id: updated.id,
           name: updated.name,
@@ -99,6 +98,7 @@ export async function PATCH(req: NextRequest) {
         const branchCode = BRANCH_NAME_TO_CODE[updated.branch];
         const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
         if (spreadsheetId) {
+          const { upsertStaffDirectory, createStaffSubsheets } = await import('@/lib/sheets/sheets-service');
           await upsertStaffDirectory(spreadsheetId, {
             staffId: updated.id,
             fullName: updated.name,
@@ -158,6 +158,7 @@ export async function PATCH(req: NextRequest) {
 
       // Sync updated role to Firestore
       try {
+        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
         await syncUserToFirestore({
           id: updated.id,
           name: updated.name,
@@ -203,6 +204,7 @@ export async function PATCH(req: NextRequest) {
 
       // Clean up Firestore doc
       try {
+        const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
         const db = getAdminFirestore();
         if (db) {
           await db.collection('users').doc(userId).delete();
@@ -216,6 +218,7 @@ export async function PATCH(req: NextRequest) {
         const branchCode = BRANCH_NAME_TO_CODE[target.branch];
         const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
         if (spreadsheetId) {
+          const { deleteStaffSubsheets } = await import('@/lib/sheets/sheets-service');
           await deleteStaffSubsheets(spreadsheetId, target.id);
         }
       } catch (sheetErr) {

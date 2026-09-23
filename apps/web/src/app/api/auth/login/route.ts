@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findUserByIdentifier, stripSensitive } from '@/lib/auth/user-store';
 import { setSessionCookie } from '@/lib/auth/session';
-import { getAdminFirestore, syncAttendanceToFirestore } from '@/lib/firebase/firebase-admin';
-import { appendAttendanceRecord } from '@/lib/sheets/sheets-service';
-import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +21,7 @@ export async function POST(req: NextRequest) {
     // Fallback: check Firestore users collection if not in local memory
     if (!user) {
       try {
+        const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
         const db = getAdminFirestore();
         if (db) {
           const cleanId = identifier.trim().toLowerCase();
