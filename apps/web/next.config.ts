@@ -41,7 +41,7 @@ const nextConfig: NextConfig = {
     keepAlive: true,
   },
   turbopack: {
-    root: path.resolve(__dirname, '..'),
+    root: path.resolve(__dirname, '../../'),
   },
   allowedDevOrigins: [
     '192.168.68.110:3000',
