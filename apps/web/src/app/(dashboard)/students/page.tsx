@@ -18,8 +18,7 @@ import {
   calculateTenureProgress
 } from '@/types/student';
 import {
-  WORKING_DAYS_SEP_2026,
-  WORKING_DAYS_OCT_2026,
+  getWorkingDaysForMonth,
   formatHumanReadableDate,
   isDateBefore,
   isDateAfter,
@@ -27,6 +26,7 @@ import {
   type StudentTrackerItem,
   type AttendanceTrackerData,
 } from '@/lib/sheets/sheets-config';
+import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
 import {
   GraduationCap,
   CalendarCheck,
@@ -188,7 +188,11 @@ function StudentManagementContent() {
   // ─────────────────────────────────────────────────────────────────────────────
   // 2. ATTENDANCE & TASK TRACKER STATE (ATT_{staffId})
   // ─────────────────────────────────────────────────────────────────────────────
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-09');
+  const liveMonthDefault = useMemo(() => {
+    const ld = getLiveDateInfo();
+    return `${ld.year}-${String(ld.month).padStart(2, '0')}`;
+  }, []);
+  const [selectedMonth, setSelectedMonth] = useState<string>(liveMonthDefault);
   const [trackerData, setTrackerData] = useState<AttendanceTrackerData | null>(null);
   const [trackerLoading, setTrackerLoading] = useState(false);
   const [trackerSaving, setTrackerSaving] = useState(false);
@@ -200,10 +204,15 @@ function StudentManagementContent() {
     if (trackerData?.workingDays && trackerData.workingDays.length > 0) {
       return trackerData.workingDays;
     }
-    if (selectedMonth === '2026-10') {
-      return WORKING_DAYS_OCT_2026;
+    // Dynamically compute working days for the selected month
+    const parts = selectedMonth.split('-');
+    if (parts.length === 2) {
+      const yr = parseInt(parts[0], 10);
+      const mo = parseInt(parts[1], 10);
+      if (!isNaN(yr) && !isNaN(mo)) return getWorkingDaysForMonth(yr, mo);
     }
-    return WORKING_DAYS_SEP_2026;
+    const ld = getLiveDateInfo();
+    return getWorkingDaysForMonth(ld.year, ld.month);
   }, [trackerData?.workingDays, selectedMonth]);
 
   const fetchTracker = useCallback(async (monthToFetch?: string) => {
@@ -248,6 +257,15 @@ function StudentManagementContent() {
     if (!staffId || !branchCode) return;
     setTrackerSaving(true);
     try {
+      // Compute next month dynamically from the currently selected month
+      const parts = selectedMonth.split('-');
+      const curYear = parseInt(parts[0] || '2026', 10);
+      const curMonth = parseInt(parts[1] || '9', 10);
+      const nextDate = new Date(curYear, curMonth, 1); // curMonth is 1-indexed, so new Date(y, curMonth, 1) = first day of next month
+      const nextYear = nextDate.getFullYear();
+      const nextMonth = nextDate.getMonth() + 1; // back to 1-indexed
+      const nextMonthKey = `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+
       const res = await fetch('/api/sheets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,13 +273,13 @@ function StudentManagementContent() {
           type: 'generate_next_month',
           staffId,
           branchCode,
-          data: { year: 2026, month: 10 }
+          data: { year: nextYear, month: nextMonth }
         })
       });
       const resData = await res.json();
       if (resData.success) {
-        setSelectedMonth('2026-10');
-        await fetchTracker('2026-10');
+        setSelectedMonth(nextMonthKey);
+        await fetchTracker(nextMonthKey);
       } else {
         setTrackerError(resData.error || 'Failed to rollover to next month');
       }

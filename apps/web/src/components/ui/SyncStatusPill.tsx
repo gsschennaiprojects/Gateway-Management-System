@@ -69,7 +69,7 @@ export function SyncStatusPill() {
       >
         {syncState === 'synced' && (
           <div className="flex items-center">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
             <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover:max-w-[80px] group-hover:opacity-100 group-hover:ml-1.5 transition-all duration-300 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
               Synced
             </span>

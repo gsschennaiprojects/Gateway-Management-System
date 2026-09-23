@@ -6,6 +6,8 @@ import { syncUserToFirestore } from '@/lib/firebase/firebase-admin';
 import { upsertStaffDirectory } from '@/lib/sheets/sheets-service';
 import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();

@@ -299,13 +299,10 @@ export default function EmployeeDashboardPage() {
                   {liveDate.dayOfWeek}, {liveDate.formattedDate}
                 </span>
                 <span
-                  className="group inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] text-[10px] font-medium border border-[var(--badge-success-border,#CEEAD6)] cursor-default transition-all duration-300"
+                  className="inline-flex items-center justify-center w-5 h-5 rounded-full cursor-default"
                   title="Live bidirectional session sync active with /worklog"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse shrink-0" />
-                  <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover:max-w-[140px] group-hover:opacity-100 group-hover:ml-1.5 transition-all duration-300 text-[10px] font-semibold text-emerald-800">
-                    Synced with /worklog
-                  </span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 </span>
               </div>
               <p className="text-xs text-[var(--text-secondary,#5F6368)] mt-0.5">

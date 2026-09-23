@@ -9,6 +9,8 @@ import { BRANCH_SEED_DATA } from '@/lib/seed-branches';
 import { upsertBranch, getUserProfile } from '@/lib/firestore';
 import { getSession } from '@/lib/auth/session';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST() {
   try {
     // Check session — basic auth guard

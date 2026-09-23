@@ -17,8 +17,6 @@ import {
   getTaskTabName,
   getAttendanceTrackerTabName,
   getColumnsForType,
-  WORKING_DAYS_SEP_2026,
-  WORKING_DAYS_OCT_2026,
   getWorkingDaysForMonth,
   isDateBefore,
   isDateAfter,
@@ -941,6 +939,22 @@ export async function upsertBranchStudent(
 // ─── Monthly Attendance & Task Tracker Matrix ─────────────────────────────────
 
 /**
+ * Dynamic working days calculation for any month key (YYYY-MM).
+ */
+export function getWorkingDaysForMonthKey(mk?: string): { date: string; day: string }[] {
+  if (mk) {
+    const parts = mk.split('-');
+    if (parts.length === 2) {
+      const yr = parseInt(parts[0], 10);
+      const mo = parseInt(parts[1], 10);
+      if (!isNaN(yr) && !isNaN(mo)) return getWorkingDaysForMonth(yr, mo);
+    }
+  }
+  const now = new Date();
+  return getWorkingDaysForMonth(now.getFullYear(), now.getMonth() + 1);
+}
+
+/**
  * Read the monthly attendance & task tracker matrix for a staff member.
  * Supports multi-month vertical stacking separated by 4-row gaps.
  */
@@ -952,19 +966,27 @@ export async function getAttendanceTracker(
   const tabName = getAttendanceTrackerTabName(staffId);
   const rows = await readSheet(spreadsheetId, tabName);
 
-  const availableFallbackMonths = [
-    { monthKey: '2026-09', title: 'September 2026' },
-    { monthKey: '2026-10', title: 'October 2026' },
-  ];
+  const now = new Date();
+  const curMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const effectiveMonthKey = targetMonthKey || curMonthKey;
+
+  // Generate available months dynamically: 3 months back + current + 2 months forward
+  const availableFallbackMonths: { monthKey: string; title: string }[] = [];
+  for (let delta = -3; delta <= 2; delta++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + delta, 1);
+    const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const title = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    availableFallbackMonths.push({ monthKey: mk, title });
+  }
 
   if (!rows || rows.length < 4) {
-    const isOct = targetMonthKey === '2026-10';
+    const targetTitle = new Date(effectiveMonthKey + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
     return {
       staffId,
-      monthKey: isOct ? '2026-10' : '2026-09',
-      monthTitle: isOct ? 'MONTHLY ATTENDANCE & TASK TRACKER — OCTOBER 2026' : 'MONTHLY ATTENDANCE & TASK TRACKER — SEPTEMBER 2026',
-      subTitle: isOct ? 'Cohort: Q4 2026 | Mon-Fri Tracking | Rolling Monthly Lifecycle' : 'Cohort: Q3-Q4 2026 | Mon-Fri Tracking | Dropdown Validation',
-      workingDays: isOct ? [...WORKING_DAYS_OCT_2026] : [...WORKING_DAYS_SEP_2026],
+      monthKey: effectiveMonthKey,
+      monthTitle: `MONTHLY ATTENDANCE & TASK TRACKER — ${targetTitle.toUpperCase()}`,
+      subTitle: 'Mon-Fri Tracking | Rolling Monthly Lifecycle',
+      workingDays: getWorkingDaysForMonthKey(effectiveMonthKey),
       students: [],
       availableMonths: availableFallbackMonths,
     };
@@ -1031,7 +1053,7 @@ export async function getAttendanceTracker(
 
   const finalWorkingDays = parsedWorkingDays.length > 0 
     ? parsedWorkingDays 
-    : (selectedBlock.monthKey === '2026-10' ? WORKING_DAYS_OCT_2026 : WORKING_DAYS_SEP_2026);
+    : getWorkingDaysForMonthKey(selectedBlock.monthKey);
 
   const students: StudentTrackerItem[] = [];
   for (let r = startRow + 4; r < rows.length; r += 2) {
@@ -1043,8 +1065,16 @@ export async function getAttendanceTracker(
 
     const domainRaw = (rowB[0] || '').trim();
     let domain = domainRaw;
-    let startDate = selectedBlock.monthKey === '2026-10' ? '2026-10-01' : '2026-09-01';
-    let endDate = selectedBlock.monthKey === '2026-10' ? '2026-12-31' : '2026-11-30';
+    // Derive default start/end from the block's month key dynamically
+    const blkParts = selectedBlock.monthKey.split('-');
+    const blkYear = parseInt(blkParts[0] || '2026', 10);
+    const blkMonth = parseInt(blkParts[1] || '9', 10);
+    const blkFirstDay = `${blkYear}-${String(blkMonth).padStart(2, '0')}-01`;
+    // Default end = last day of month 3 months later
+    const endMonthDate = new Date(blkYear, blkMonth + 2, 0); // month+2 since month is 1-indexed and getDate returns last day
+    const blkEndDay = `${endMonthDate.getFullYear()}-${String(endMonthDate.getMonth() + 1).padStart(2, '0')}-${String(endMonthDate.getDate()).padStart(2, '0')}`;
+    let startDate = blkFirstDay;
+    let endDate = blkEndDay;
     const tenureDays = 90;
 
     const dateMatch = domainRaw.match(/^(.*?)\s*\[(.*?)\s*→\s*(.*?)\]$/);
@@ -1122,9 +1152,9 @@ export async function saveAttendanceTracker(
     }
   }
 
-  const workingDays = data.workingDays && data.workingDays.length > 0 
+  const workingDays: { date: string; day: string }[] = data.workingDays && data.workingDays.length > 0 
     ? data.workingDays 
-    : (data.monthKey === '2026-10' ? WORKING_DAYS_OCT_2026 : WORKING_DAYS_SEP_2026);
+    : getWorkingDaysForMonthKey(data.monthKey);
 
   const totalCols = 2 + workingDays.length + 5;
   const lastColLetter = numberToColLetter(totalCols);
@@ -1133,7 +1163,10 @@ export async function saveAttendanceTracker(
 
   // Row 1: Banner
   const row1 = Array(totalCols).fill('');
-  row1[0] = data.monthTitle || (data.monthKey === '2026-10' ? 'MONTHLY ATTENDANCE & TASK TRACKER — OCTOBER 2026' : 'MONTHLY ATTENDANCE & TASK TRACKER — SEPTEMBER 2026');
+  row1[0] = data.monthTitle || (() => {
+    const targetTitle = new Date(data.monthKey + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    return `MONTHLY ATTENDANCE & TASK TRACKER \u2014 ${targetTitle.toUpperCase()}`;
+  })();
   blockRows.push(row1);
 
   // Row 2: Sub-banner
@@ -1145,7 +1178,7 @@ export async function saveAttendanceTracker(
   blockRows.push([
     'Intern Name',
     'Tracking Metric',
-    ...workingDays.map(w => w.date),
+    ...workingDays.map((w: { date: string; day: string }) => w.date),
     'Total Present',
     'Total Absent',
     'Attendance %',
@@ -1157,7 +1190,7 @@ export async function saveAttendanceTracker(
   blockRows.push([
     'Domain / Track & Tenure',
     'Daily Log Type',
-    ...workingDays.map(w => w.day),
+    ...workingDays.map((w: { date: string; day: string }) => w.day),
     'Summary',
     'Summary',
     'Rate %',
@@ -1207,12 +1240,12 @@ export async function saveAttendanceTracker(
   const dailyPresentRow = [
     'Daily Total Present',
     'Cohort Attendance',
-    ...workingDays.map((_, i) => {
+    ...workingDays.map((_: { date: string; day: string }, i: number) => {
       const cLetter = numberToColLetter(i + 3);
       return `=COUNTIF(${cLetter}${firstStuRow}:${cLetter}${lastStuRow}, "Present")`;
     }),
-    students.map((_, i) => `${colTotPres}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_, i) => `${colTotPres}${firstStuRow + i * 2}`).join('+')}` : '',
-    students.map((_, i) => `${colTotAbs}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_, i) => `${colTotAbs}${firstStuRow + i * 2}`).join('+')}` : '',
+    students.map((_: any, i: number) => `${colTotPres}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_: any, i: number) => `${colTotPres}${firstStuRow + i * 2}`).join('+')}` : '',
+    students.map((_: any, i: number) => `${colTotAbs}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_: any, i: number) => `${colTotAbs}${firstStuRow + i * 2}`).join('+')}` : '',
     '',
     '',
     ''
@@ -1222,14 +1255,14 @@ export async function saveAttendanceTracker(
   const dailyTasksRow = [
     'Daily Tasks Completed',
     'Cohort Tasks',
-    ...workingDays.map((_, i) => {
+    ...workingDays.map((_: { date: string; day: string }, i: number) => {
       const cLetter = numberToColLetter(i + 3);
       return `=COUNTIF(${cLetter}${firstStuRow}:${cLetter}${lastStuRow}, "Completed")`;
     }),
     '',
     '',
     '',
-    students.map((_, i) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+') ? `=${students.map((_, i) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+')}` : '',
+    students.map((_: any, i: number) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+') ? `=${students.map((_: any, i: number) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+')}` : '',
     ''
   ];
   blockRows.push(dailyTasksRow);

@@ -33,6 +33,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['firebase-admin', '@google-cloud/firestore'],
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,

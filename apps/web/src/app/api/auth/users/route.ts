@@ -14,6 +14,8 @@ import { syncUserToFirestore, getAdminFirestore } from '@/lib/firebase/firebase-
 import { upsertStaffDirectory, createStaffSubsheets, deleteStaffSubsheets } from '@/lib/sheets/sheets-service';
 import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session || !session.user) {

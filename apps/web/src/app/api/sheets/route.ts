@@ -93,6 +93,8 @@ function canAccessStaffData(session: { userId: string; role: string; staffId?: s
 
 // ─── GET Handler ───────────────────────────────────────────────────────────────
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session) {
