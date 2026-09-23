@@ -13,6 +13,9 @@ export interface LiveDateInfo {
   fullDate: string;       // "Wednesday, September 23, 2026"
   monthName: string;      // "September 2026"
   currentTime: string;    // "01:15 PM"
+  year: number;           // 2026
+  month: number;          // 9 (1-indexed)
+  day: number;            // 23
 }
 
 export interface WorkingTimeCalculation {
@@ -32,8 +35,10 @@ export function getLiveDateInfo(referenceDate?: Date): LiveDateInfo {
   const d = referenceDate || new Date();
   
   const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
+  const monthNum = d.getMonth() + 1;
+  const dayNum = d.getDate();
+  const mm = String(monthNum).padStart(2, '0');
+  const dd = String(dayNum).padStart(2, '0');
   
   const dayOfWeek = d.toLocaleDateString('en-US', { weekday: 'long' });
   const shortDay = d.toLocaleDateString('en-US', { weekday: 'short' });
@@ -51,6 +56,9 @@ export function getLiveDateInfo(referenceDate?: Date): LiveDateInfo {
     fullDate,
     monthName,
     currentTime,
+    year: yyyy,
+    month: monthNum,
+    day: dayNum,
   };
 }
 

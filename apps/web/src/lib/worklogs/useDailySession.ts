@@ -177,7 +177,7 @@ export function useDailySession() {
     } finally {
       setLoading(false);
     }
-  }, [user, storageKey, liveDate.currentTime]);
+  }, [user, storageKey]);
 
   // Initial load
   useEffect(() => {
@@ -304,6 +304,38 @@ export function useDailySession() {
     },
     [loginTime, plannedTasks, completedTasks, incompleteReason, updateLocalStorage, broadcastSync]
   );
+
+  // ── Action: Clear / Reset Punch Session ──────────────────────────────────
+  const clearPunch = useCallback(async () => {
+    setLoginTime('');
+    setLogoutTime('');
+    setIsPunchedIn(false);
+    setIsPunchedOut(false);
+    setTotalHours('');
+    setElapsedTime(null);
+
+    if (storageKey && typeof window !== 'undefined') {
+      localStorage.removeItem(storageKey);
+    }
+    broadcastSync({
+      loginTime: '',
+      logoutTime: '',
+      isPunchedIn: false,
+      isPunchedOut: false,
+      totalHours: '',
+    });
+
+    try {
+      await fetch('/api/worklogs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clearPunch', date: liveDate.isoDate }),
+      });
+      setSuccess('Punch session cleared. Ready to start new session.');
+    } catch (e) {
+      console.warn('[clearPunch] note:', e);
+    }
+  }, [storageKey, liveDate.isoDate, broadcastSync]);
 
   // ── Action: Save Worklog ──────────────────────────────────────────────────
   const saveSession = useCallback(async () => {

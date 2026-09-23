@@ -48,12 +48,14 @@ export function ThemeSelector() {
       {/* Trigger Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-2 sm:px-3 sm:py-1.5 rounded-full flex items-center gap-2 border border-[var(--border-card,#DADCE0)] bg-[var(--bg-card,#FFFFFF)] hover:bg-[var(--bg-card-hover,#F8FAFD)] text-[var(--text-primary,#1F1F1F)] transition-all cursor-pointer shadow-xs"
-        title="Change Appearance Theme"
+        className="group h-8 px-2.5 rounded-full flex items-center justify-center border border-[var(--border-card,#DADCE0)] bg-[var(--bg-card,#FFFFFF)] hover:bg-[var(--bg-card-hover,#F8FAFD)] text-[var(--text-primary,#1F1F1F)] transition-all duration-300 cursor-pointer shadow-xs"
+        title={`Appearance Theme: ${currentThemeConfig.label} (Click to switch)`}
         aria-label="Theme selector"
       >
-        <span className="shrink-0">{currentThemeConfig.icon}</span>
-        <span className="hidden lg:inline text-xs font-medium">
+        <span className="shrink-0 transition-transform duration-200 group-hover:scale-110">
+          {currentThemeConfig.icon}
+        </span>
+        <span className="max-w-0 opacity-0 overflow-hidden whitespace-nowrap group-hover:max-w-[110px] group-hover:opacity-100 group-hover:ml-1.5 transition-all duration-300 text-xs font-semibold text-[var(--text-primary,#1F1F1F)]">
           {currentThemeConfig.label}
         </span>
       </button>

@@ -67,7 +67,7 @@ export function calculateTenureProgress(startDateStr: string, endDateStr: string
 } {
   const start = new Date(startDateStr);
   const end = new Date(endDateStr);
-  const now = new Date('2026-09-12T00:00:00'); // Consistent system date September 12, 2026
+  const now = new Date(); // Dynamic live system date
 
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
     return { totalDays: 90, elapsedDays: 45, remainingDays: 45, percentage: 50 };

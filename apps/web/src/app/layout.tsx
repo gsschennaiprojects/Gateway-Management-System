@@ -37,8 +37,16 @@ export const metadata: Metadata = {
     title: 'GSS Management System',
   },
   icons: {
-    icon: '/brand/gss-logo.png',
-    apple: '/icon-192.png',
+    icon: [
+      { url: '/brand/gss-liquid-icon.png', type: 'image/png' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: 'any' },
+    ],
+    shortcut: '/brand/gss-liquid-icon.png',
+    apple: [
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/brand/gss-liquid-icon.png' },
+    ],
   },
 };
 

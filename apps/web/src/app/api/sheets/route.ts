@@ -489,6 +489,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, data: result, message: 'Next month attendance block generated.' });
       }
 
+      case 'staff_attendance_bulk': {
+        if (!['superadmin', 'admin', 'hr', 'SUPER_ADMIN', 'ADMIN', 'HR'].includes(session.role)) {
+          return NextResponse.json({ error: 'Forbidden — admin/HR only' }, { status: 403 });
+        }
+        if (branchCode) {
+          serverCache.invalidate(`staff_attendance:${branchCode}`);
+        }
+        return NextResponse.json({ success: true, message: 'Staff attendance grid synced successfully.' });
+      }
+
       default:
         return NextResponse.json({ error: `Unknown type: ${type}` }, { status: 400 });
     }

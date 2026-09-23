@@ -91,3 +91,8 @@ export function addWorkLog(entry: Omit<WorkLogEntry, 'id'> & { id?: string }): W
   return newEntry;
 }
 
+export function clearTodayWorkLog(userId: string, date: string): void {
+  serverWorkLogs = serverWorkLogs.filter((l) => !(l.userId === userId && (l.date === date || l.date.replace(/-/g, '') === date.replace(/-/g, ''))));
+}
+
+

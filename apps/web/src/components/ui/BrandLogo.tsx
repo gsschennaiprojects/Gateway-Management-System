@@ -37,21 +37,21 @@ export function BrandLogo({
     <div
       className={`inline-flex items-center gap-2.5 select-none group transition-transform duration-200 shrink-0 ${className}`}
     >
-      {/* Logo Icon Container - strictly sized, never clipped */}
+      {/* Logo Icon Container - strictly sized, never clipped with luxury liquid glass feel */}
       <div
-        className="relative flex items-center justify-center shrink-0"
+        className="relative flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-105"
         style={{
           width: config.icon + 4,
           height: config.icon + 4,
         }}
       >
         <Image
-          src="/brand/gss-logo.png"
+          src="/brand/gss-liquid-icon.png"
           alt="Gateway Software Solutions"
           width={config.icon + 4}
           height={config.icon + 4}
           priority
-          className="w-full h-full object-contain shrink-0"
+          className="w-full h-full object-contain shrink-0 drop-shadow-xs"
         />
       </div>
 

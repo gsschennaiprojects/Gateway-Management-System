@@ -76,9 +76,16 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const user = session.user;
     const liveInfo = getLiveDateInfo();
-    const action = body.action || 'save'; // 'punchIn' | 'punchOut' | 'save'
+    const action = body.action || 'save'; // 'punchIn' | 'punchOut' | 'save' | 'clearPunch'
 
     const targetDate = body.date || liveInfo.isoDate;
+
+    if (action === 'clearPunch') {
+      const { clearTodayWorkLog } = await import('@/lib/worklogs/worklog-store');
+      clearTodayWorkLog(user.id, targetDate);
+      return NextResponse.json({ success: true, message: 'Punch session reset and cleared successfully.' });
+    }
+
     const dateKey = targetDate.replace(/-/g, '');
     const attId = `ATT_${user.id}_${dateKey}`;
 
