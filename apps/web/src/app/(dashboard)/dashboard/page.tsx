@@ -73,8 +73,8 @@ export default function EmployeeDashboardPage() {
     }
   };
 
-  // Daily Punch In / Out State
-  const [isPunchedIn, setIsPunchedIn] = useState(false);
+  // Daily Punch In / Out State (Auto-marked Present upon staff login)
+  const [isPunchedIn, setIsPunchedIn] = useState(true);
   const [punchInTime, setPunchInTime] = useState<string | null>(null);
   const [plannedTasks, setPlannedTasks] = useState<string[]>([]);
   const [newTaskInput, setNewTaskInput] = useState('');
@@ -85,6 +85,30 @@ export default function EmployeeDashboardPage() {
   const [completedTasks, setCompletedTasks] = useState<string[]>([]);
   const [completedTaskInput, setCompletedTaskInput] = useState('');
 
+  // Auto-mark attendance present upon staff login
+  useEffect(() => {
+    if (!user) return;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const key = `gss_punch_${user.id}_${todayStr}`;
+    const stored = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setIsPunchedIn(true);
+        setPunchInTime(parsed.time || '09:00 AM');
+      } catch (e) {
+        setIsPunchedIn(true);
+      }
+    } else {
+      const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setIsPunchedIn(true);
+      setPunchInTime(nowTime);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(key, JSON.stringify({ time: nowTime, status: 'Present' }));
+      }
+    }
+  }, [user]);
+
   // Student Attendance List State
   const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
 
@@ -92,6 +116,10 @@ export default function EmployeeDashboardPage() {
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setPunchInTime(timeStr);
     setIsPunchedIn(true);
+    if (user && typeof window !== 'undefined') {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      localStorage.setItem(`gss_punch_${user.id}_${todayStr}`, JSON.stringify({ time: timeStr, status: 'Present' }));
+    }
   };
 
   const handlePunchOut = () => {
@@ -326,8 +354,9 @@ export default function EmployeeDashboardPage() {
               </Button>
             ) : !isPunchedOut ? (
               <div className="flex items-center gap-3">
-                <span className="text-xs px-3 py-1 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)] font-medium">
-                  Logged In at {punchInTime}
+                <span className="text-xs px-3 py-1.5 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)] font-medium flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  Auto-Marked Present at {punchInTime}
                 </span>
                 <Button
                   variant="danger"

@@ -571,6 +571,28 @@ export async function appendAttendanceRecord(
 }
 
 /**
+ * Automatically mark/upsert staff attendance as Present in 04_Staff_Attendance upon login.
+ * Idempotent: If a record exists for today, keeps status as Present and updates check-in time without creating duplicate rows.
+ */
+export async function upsertStaffAttendanceRecord(
+  spreadsheetId: string,
+  values: (string | number)[]
+): Promise<void> {
+  const tabName = COMMON_SHEET_NAMES.STAFF_ATTENDANCE;
+  const attId = String(values[0]);
+  const existing = await findRow(spreadsheetId, tabName, 0, attId);
+  if (existing) {
+    // Preserve existing check-in time if already punched in
+    if (existing.data[6] && existing.data[6] !== '-') {
+      values[6] = existing.data[6];
+    }
+    await updateRow(spreadsheetId, tabName, existing.rowNumber, values, values.length);
+  } else {
+    await appendRow(spreadsheetId, tabName, values);
+  }
+}
+
+/**
  * Append or update a staff member in 02_Staff_Directory.
  */
 export async function upsertStaffDirectory(

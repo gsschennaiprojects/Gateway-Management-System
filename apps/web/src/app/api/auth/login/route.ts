@@ -102,7 +102,8 @@ export async function POST(req: NextRequest) {
       const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
       if (spreadsheetId) {
         // Attendance headers: ['Attendance_ID', 'Date', 'Day', 'Staff_ID', 'Staff_Name', 'Role', 'Check_In', 'Check_Out', 'Total_Hours', 'Status', 'Marked_By', 'Timestamp']
-        await appendAttendanceRecord(spreadsheetId, [
+        const { upsertStaffAttendanceRecord } = await import('@/lib/sheets/sheets-service');
+        await upsertStaffAttendanceRecord(spreadsheetId, [
           attId,
           todayStr,
           dayStr,
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
           '-',
           '0',
           'Present',
-          'Web App Login',
+          'Auto Login',
           now.toISOString()
         ]);
       }
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest) {
         module: 'AUTH',
         recordId: safeUser.id,
         branch: safeUser.branch,
-        newValue: 'Session Active',
+        newValue: 'Present (Auto-Marked)',
         ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
       });
     } catch (auditErr) {
@@ -141,7 +142,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      user: safeUser
+      user: safeUser,
+      attendanceMarked: true,
+      attendanceStatus: 'Present',
+      punchInTime: timeStr
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Authentication failed';
