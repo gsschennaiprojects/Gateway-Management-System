@@ -1,4 +1,5 @@
 import { getAdminFirestore } from '../firebase/firebase-admin';
+import type { Query } from 'firebase-admin/firestore';
 import { getSheetsApi } from '../sheets/sheets-service';
 import { BRANCH_SPREADSHEET_MAP } from '../seed-branches';
 
@@ -102,7 +103,7 @@ export async function getAuditLogs(options?: {
     const db = getAdminFirestore();
     if (!db) return [];
 
-    let query: FirebaseFirestore.Query = db.collection('audit_logs');
+    let query: Query = db.collection('audit_logs');
 
     if (options?.branch && options.branch !== 'All' && options.branch !== 'all') {
       const bCode = resolveBranchCode(options.branch);
