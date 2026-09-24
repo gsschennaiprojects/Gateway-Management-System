@@ -166,7 +166,10 @@ export async function syncTaskToFirestore(taskData: {
   assignedBy: any;
   targetType: string;
   targetUserId?: string;
+  targetUserName?: string;
+  targetUserRole?: string;
   targetGroup?: any;
+  assignedToUserIds?: string[];
   priority: string;
   dueDate?: string;
   status: string;
@@ -355,5 +358,334 @@ export async function deleteUserFromFirestore(userId: string, email?: string, mo
   } catch (err: any) {
     console.error('[FirebaseAdmin] deleteUserFromFirestore error:', err?.message || err);
     return false;
+  }
+}
+
+/**
+ * Sync Branch definition to Firestore `branches` collection.
+ */
+export async function syncBranchToFirestore(branch: any): Promise<boolean> {
+  const db = getAdminFirestore();
+  if (!db) return false;
+
+  try {
+    await db.collection('branches').doc(branch.branchId).set({
+      ...branch,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    return true;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] syncBranchToFirestore error:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Fetch all branches from Firestore.
+ */
+export async function getFirestoreBranches(): Promise<any[]> {
+  const db = getAdminFirestore();
+  if (!db) return [];
+
+  try {
+    const snap = await db.collection('branches').get();
+    return snap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreBranches error:', err?.message || err);
+    return [];
+  }
+}
+
+/**
+ * Seed all default 4 branches to Firestore if missing.
+ */
+export async function seedDefaultBranchesToFirestore(): Promise<number> {
+  const db = getAdminFirestore();
+  if (!db) return 0;
+
+  try {
+    const { BRANCH_SEED_DATA } = await import('@/lib/seed-branches');
+    let count = 0;
+    for (const b of BRANCH_SEED_DATA) {
+      await db.collection('branches').doc(b.branchId).set({
+        ...b,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      count++;
+    }
+    return count;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] seedDefaultBranchesToFirestore error:', err?.message || err);
+    return 0;
+  }
+}
+
+/**
+ * Fetch tasks from Firestore `tasks` collection with role/branch scoping.
+ */
+export async function getFirestoreTasks(filter?: {
+  role?: string;
+  userId?: string;
+  branch?: string;
+}): Promise<any[]> {
+  const db = getAdminFirestore();
+  if (!db) return [];
+
+  try {
+    const snap = await db.collection('tasks').limit(150).get();
+    let tasks = snap.docs.map(doc => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        title: d.title || '',
+        description: d.description || '',
+        assignedBy: d.assignedBy || { id: 'SYSTEM', name: 'Management', role: 'admin' },
+        targetType: d.targetType || 'individual',
+        targetUserId: d.targetUserId,
+        targetUserName: d.targetUserName,
+        targetUserRole: d.targetUserRole,
+        targetGroup: d.targetGroup,
+        assignedToUserIds: d.assignedToUserIds || (d.targetUserId ? [d.targetUserId] : []),
+        priority: d.priority || 'medium',
+        dueDate: d.dueDate || '',
+        status: d.status || 'pending',
+        createdAt: d.createdAt || new Date().toISOString(),
+        updatedAt: d.updatedAt || new Date().toISOString()
+      };
+    });
+
+    if (!filter) return tasks;
+    const { role, userId, branch } = filter;
+
+    if (role === 'superadmin') {
+      return tasks;
+    }
+
+    if (role === 'admin') {
+      return tasks.filter(t =>
+        t.assignedBy?.id === userId ||
+        t.targetGroup?.branch === branch ||
+        t.assignedToUserIds?.includes(userId)
+      );
+    }
+
+    // HR, Employee, Intern: their assigned tasks
+    return tasks.filter(t =>
+      t.assignedToUserIds?.includes(userId) ||
+      t.targetUserId === userId
+    );
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreTasks error:', err?.message || err);
+    return [];
+  }
+}
+
+/**
+ * Update task status in Firestore `tasks` collection.
+ */
+export async function updateFirestoreTaskStatus(taskId: string, status: string): Promise<boolean> {
+  const db = getAdminFirestore();
+  if (!db) return false;
+
+  try {
+    await db.collection('tasks').doc(taskId).set({
+      status,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    return true;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] updateFirestoreTaskStatus error:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Sync Notification to Firestore `notifications` collection.
+ */
+export async function syncNotificationToFirestore(notif: {
+  id: string;
+  recipientId: string;
+  title: string;
+  message: string;
+  type: string;
+  taskId?: string;
+  teamName?: string;
+  isRead: boolean;
+  createdAt: string;
+}): Promise<boolean> {
+  const db = getAdminFirestore();
+  if (!db) return false;
+
+  try {
+    await db.collection('notifications').doc(notif.id).set({
+      ...notif,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    return true;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] syncNotificationToFirestore error:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Fetch notifications for a recipient from Firestore.
+ */
+export async function getFirestoreNotifications(recipientId: string): Promise<any[]> {
+  const db = getAdminFirestore();
+  if (!db) return [];
+
+  try {
+    const snap = await db.collection('notifications')
+      .where('recipientId', '==', recipientId)
+      .limit(50)
+      .get();
+    
+    return snap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })).sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreNotifications error:', err?.message || err);
+    return [];
+  }
+}
+
+/**
+ * Mark a single notification as read in Firestore.
+ */
+export async function markFirestoreNotificationAsRead(notificationId: string): Promise<boolean> {
+  const db = getAdminFirestore();
+  if (!db) return false;
+
+  try {
+    await db.collection('notifications').doc(notificationId).set({
+      isRead: true,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    return true;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] markFirestoreNotificationAsRead error:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Mark all notifications for a recipient as read in Firestore.
+ */
+export async function markAllFirestoreNotificationsAsRead(recipientId: string): Promise<boolean> {
+  const db = getAdminFirestore();
+  if (!db) return false;
+
+  try {
+    const snap = await db.collection('notifications')
+      .where('recipientId', '==', recipientId)
+      .where('isRead', '==', false)
+      .get();
+    
+    if (snap.empty) return true;
+    const batch = db.batch();
+    for (const doc of snap.docs) {
+      batch.update(doc.ref, { isRead: true, updatedAt: new Date().toISOString() });
+    }
+    await batch.commit();
+    return true;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] markAllFirestoreNotificationsAsRead error:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Fetch Students from Firestore `students` collection.
+ */
+export async function getFirestoreStudents(options?: {
+  branch?: string;
+  staffId?: string;
+}): Promise<any[]> {
+  const db = getAdminFirestore();
+  if (!db) return [];
+
+  try {
+    const snap = await db.collection('students').limit(200).get();
+    let students = snap.docs.map((doc: any) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        studentId: d.studentId || doc.id,
+        studentName: d.studentName || d.name || 'Student',
+        branch: d.branch || 'Coimbatore',
+        college: d.college || 'Engineering College',
+        department: d.department || 'Computer Science',
+        year: d.year || 'IV',
+        email: d.email || `${(d.studentId || doc.id).toLowerCase()}@student.guvi.in`,
+        mobile: d.mobile || '+91 98765 43210',
+        course: d.course || 'Internship',
+        domain: d.domain || 'Full Stack Web (MERN)',
+        mentorStaffId: d.mentorStaffId || '',
+        mentorName: d.mentorName || 'Staff Mentor',
+        admissionDate: d.admissionDate || d.startDate || '2026-07-01',
+        endDate: d.endDate || '2026-09-30',
+        feeStatus: d.feeStatus || 'Pending',
+        projectStatus: d.projectStatus || 'Ongoing',
+        studentStatus: d.studentStatus || 'Active',
+        createdAt: d.createdAt || new Date().toISOString()
+      };
+    });
+
+    if (options?.branch && options.branch !== 'all' && options.branch !== 'ALL') {
+      const b = options.branch.toLowerCase();
+      students = students.filter(s => {
+        const sb = (s.branch || '').toLowerCase();
+        return sb === b || sb.includes(b) || (b.includes('cbe') && sb.includes('coimbatore')) || (b.includes('coimbatore') && sb.includes('cbe'));
+      });
+    }
+
+    if (options?.staffId) {
+      students = students.filter(s => s.mentorStaffId === options.staffId);
+    }
+
+    return students;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreStudents error:', err?.message || err);
+    return [];
+  }
+}
+
+/**
+ * Fetch Worklogs from Firestore `daily_worklogs` collection.
+ */
+export async function getFirestoreWorklogs(options?: {
+  userId?: string;
+  branch?: string;
+  date?: string;
+}): Promise<any[]> {
+  const db = getAdminFirestore();
+  if (!db) return [];
+
+  try {
+    const snap = await db.collection('daily_worklogs').limit(150).get();
+    let logs = snap.docs.map((doc: any) => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    if (options?.userId) {
+      logs = logs.filter(l => l.userId === options.userId);
+    }
+    if (options?.branch && options.branch !== 'all') {
+      logs = logs.filter(l => l.branch === options.branch);
+    }
+    if (options?.date) {
+      logs = logs.filter(l => l.date === options.date);
+    }
+
+    return logs;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreWorklogs error:', err?.message || err);
+    return [];
   }
 }

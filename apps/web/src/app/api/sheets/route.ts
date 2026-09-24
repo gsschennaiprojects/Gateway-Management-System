@@ -44,7 +44,9 @@ import {
   syncStudentToFirestore,
   syncTaskToFirestore,
   syncWorklogToFirestore,
-  syncAttendanceToFirestore
+  syncAttendanceToFirestore,
+  getFirestoreStudents,
+  getFirestoreWorklogs
 } from '@/lib/firebase/firebase-admin';
 
 // ─── Auth Helper ───────────────────────────────────────────────────────────────
@@ -150,6 +152,26 @@ export async function GET(request: NextRequest) {
       case 'worklog': {
         if (!staffId) return NextResponse.json({ error: 'Missing "staffId" for worklog' }, { status: 400 });
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+        // 1. Authoritative Firestore check
+        try {
+          const fsLogs = await getFirestoreWorklogs({ userId: staffId, branch: branchCode });
+          if (fsLogs && fsLogs.length > 0) {
+            const formatted = fsLogs.map(l => ({
+              date: l.date,
+              loginTime: l.loginTime,
+              logoutTime: l.logoutTime,
+              tasksPending: Array.isArray(l.plannedTasks) ? l.plannedTasks.join('; ') : (l.plannedTasks || ''),
+              tasksCompleted: Array.isArray(l.completedTasks) ? l.completedTasks.join('; ') : (l.completedTasks || ''),
+              totalHours: `${l.hoursLogged || 8.5} hrs`,
+              staffSignature: l.userName || staffId
+            }));
+            return NextResponse.json({ success: true, data: formatted, count: formatted.length, source: 'firestore' }, { headers: defaultHeaders });
+          }
+        } catch (fsErr) {
+          console.warn('[API/Sheets] Firestore worklog check note:', fsErr);
+        }
+
         const data = await getStaffWorklogs(spreadsheetId, staffId);
         serverCache.set(requestCacheKey, { data, count: data.length }, 30, 90);
         return NextResponse.json({ success: true, data, count: data.length }, { headers: defaultHeaders });
@@ -158,6 +180,17 @@ export async function GET(request: NextRequest) {
       case 'student': {
         if (!staffId) return NextResponse.json({ error: 'Missing "staffId" for student' }, { status: 400 });
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+        // 1. Authoritative Firestore check
+        try {
+          const fsStudents = await getFirestoreStudents({ staffId, branch: branchCode });
+          if (fsStudents && fsStudents.length > 0) {
+            return NextResponse.json({ success: true, data: fsStudents, count: fsStudents.length, source: 'firestore' }, { headers: defaultHeaders });
+          }
+        } catch (fsErr) {
+          console.warn('[API/Sheets] Firestore mentor student check note:', fsErr);
+        }
+
         const data = await getMentorStudents(spreadsheetId, staffId);
         serverCache.set(requestCacheKey, { data, count: data.length }, 30, 90);
         return NextResponse.json({ success: true, data, count: data.length }, { headers: defaultHeaders });
@@ -166,6 +199,30 @@ export async function GET(request: NextRequest) {
       case 'task': {
         if (!staffId) return NextResponse.json({ error: 'Missing "staffId" for task' }, { status: 400 });
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+        // 1. Authoritative Firestore check
+        try {
+          const { getFirestoreTasks } = await import('@/lib/firebase/firebase-admin');
+          const fsTasks = await getFirestoreTasks({ userId: staffId, role: session.role, branch: branchCode });
+          if (fsTasks && fsTasks.length > 0) {
+            const formatted = fsTasks.map(t => ({
+              taskId: t.id,
+              dateAssigned: t.createdAt?.split('T')[0] || '',
+              assignedByName: t.assignedBy?.name || 'Management',
+              assignedById: t.assignedBy?.id || '',
+              priority: t.priority || 'medium',
+              taskTitle: t.title,
+              description: t.description || '',
+              dueDate: t.dueDate || '',
+              status: t.status || 'pending',
+              feedback: ''
+            }));
+            return NextResponse.json({ success: true, data: formatted, count: formatted.length, source: 'firestore' }, { headers: defaultHeaders });
+          }
+        } catch (fsErr) {
+          console.warn('[API/Sheets] Firestore task check note:', fsErr);
+        }
+
         const data = await getStaffTasks(spreadsheetId, staffId);
         serverCache.set(requestCacheKey, { data, count: data.length }, 30, 90);
         return NextResponse.json({ success: true, data, count: data.length }, { headers: defaultHeaders });
@@ -186,6 +243,18 @@ export async function GET(request: NextRequest) {
       }
 
       case 'branch_student_directory': {
+        // 1. Authoritative Firestore check
+        try {
+          const fsStudents = await getFirestoreStudents({ branch: branchCode });
+          if (fsStudents && fsStudents.length > 0) {
+            return NextResponse.json({ success: true, data: fsStudents, count: fsStudents.length, source: 'firestore' }, {
+              headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=120', 'X-GSS-Cache': 'MISS' }
+            });
+          }
+        } catch (fsErr) {
+          console.warn('[API/Sheets] Firestore branch student check note:', fsErr);
+        }
+
         const data = await readBranchStudentDirectory(spreadsheetId);
         serverCache.set(requestCacheKey, { data, count: data.length }, 45, 120);
         return NextResponse.json({ success: true, data, count: data.length }, {
@@ -211,76 +280,67 @@ export async function GET(request: NextRequest) {
     // Enterprise Resilient Fallback Dataset (ensures 100% uptime when API credentials are offline or rate-limited)
     let fallbackPayload: { data: any; count?: number } | null = null;
     switch (type) {
-      case 'branch_student_directory':
-        fallbackPayload = {
-          data: [],
-          count: 0,
-        };
+      case 'branch_student_directory': {
+        try {
+          const fsStudents = await getFirestoreStudents({ branch: branchCode || undefined });
+          fallbackPayload = { data: fsStudents, count: fsStudents.length };
+        } catch {
+          fallbackPayload = { data: [], count: 0 };
+        }
         break;
+      }
 
-      case 'attendance_tracker':
-        fallbackPayload = {
-          data: {
-            monthKey: searchParams.get('month') || '2026-09',
-            monthTitle: 'MONTHLY ATTENDANCE & TASK TRACKER — SEPTEMBER 2026',
-            subTitle: 'Cohort: Q3-Q4 2026 | Mon-Fri Tracking | Dropdown Validation',
-            workingDays: [
-              { date: '2026-09-01', day: 'Tue' }, { date: '2026-09-02', day: 'Wed' }, { date: '2026-09-03', day: 'Thu' },
-              { date: '2026-09-04', day: 'Fri' }, { date: '2026-09-07', day: 'Mon' }, { date: '2026-09-08', day: 'Tue' },
-              { date: '2026-09-09', day: 'Wed' }, { date: '2026-09-10', day: 'Thu' }, { date: '2026-09-11', day: 'Fri' },
-              { date: '2026-09-14', day: 'Mon' }, { date: '2026-09-15', day: 'Tue' }, { date: '2026-09-16', day: 'Wed' },
-              { date: '2026-09-17', day: 'Thu' }, { date: '2026-09-18', day: 'Fri' }, { date: '2026-09-21', day: 'Mon' },
-              { date: '2026-09-22', day: 'Tue' }, { date: '2026-09-23', day: 'Wed' }, { date: '2026-09-24', day: 'Thu' },
-              { date: '2026-09-25', day: 'Fri' }, { date: '2026-09-28', day: 'Mon' }, { date: '2026-09-29', day: 'Tue' },
-              { date: '2026-09-30', day: 'Wed' },
-            ],
-            availableMonths: [
-              { monthKey: '2026-09', title: 'September 2026' },
-              { monthKey: '2026-10', title: 'October 2026' },
-            ],
-            students: [],
-          },
-        };
+      case 'student': {
+        try {
+          const fsStudents = await getFirestoreStudents({ staffId: staffId || undefined, branch: branchCode || undefined });
+          fallbackPayload = { data: fsStudents, count: fsStudents.length };
+        } catch {
+          fallbackPayload = { data: [], count: 0 };
+        }
         break;
+      }
 
-      case 'staff_directory':
-        fallbackPayload = {
-          data: [
-            { staffId: 'CBE_ADM01', name: 'SABARINATHAN Muthu', email: 'gateway.managercbe@gmail.com', role: 'Super Admin', branch: 'Coimbatore', mobile: '7397078885' },
-          ],
-          count: 1,
-        };
+      case 'worklog': {
+        try {
+          const fsLogs = await getFirestoreWorklogs({ userId: staffId || undefined, branch: branchCode || undefined });
+          const formatted = fsLogs.map(l => ({
+            date: l.date,
+            loginTime: l.loginTime,
+            logoutTime: l.logoutTime,
+            tasksPending: Array.isArray(l.plannedTasks) ? l.plannedTasks.join('; ') : (l.plannedTasks || ''),
+            tasksCompleted: Array.isArray(l.completedTasks) ? l.completedTasks.join('; ') : (l.completedTasks || ''),
+            totalHours: `${l.hoursLogged || 8.5} hrs`,
+            staffSignature: l.userName || staffId || 'Staff'
+          }));
+          fallbackPayload = { data: formatted, count: formatted.length };
+        } catch {
+          fallbackPayload = { data: [], count: 0 };
+        }
         break;
+      }
 
-      case 'staff_attendance':
-        fallbackPayload = {
-          data: [
-            { staffId: 'CBE_ADM01', name: 'SABARINATHAN Muthu', date: new Date().toISOString().split('T')[0], status: 'Present', punchIn: '09:00 AM', punchOut: '06:00 PM' },
-          ],
-          count: 1,
-        };
+      case 'task': {
+        try {
+          const { getFirestoreTasks } = await import('@/lib/firebase/firebase-admin');
+          const fsTasks = await getFirestoreTasks({ userId: staffId || undefined, role: session?.role, branch: branchCode || undefined });
+          const formatted = fsTasks.map(t => ({
+            taskId: t.id,
+            dateAssigned: t.createdAt?.split('T')[0] || '',
+            assignedByName: t.assignedBy?.name || 'Management',
+            assignedById: t.assignedBy?.id || '',
+            priority: t.priority || 'medium',
+            taskTitle: t.title,
+            description: t.description || '',
+            dueDate: t.dueDate || '',
+            status: t.status || 'pending',
+            feedback: ''
+          }));
+          fallbackPayload = { data: formatted, count: formatted.length };
+        } catch {
+          fallbackPayload = { data: [], count: 0 };
+        }
         break;
-
-      case 'worklog':
-        fallbackPayload = {
-          data: [],
-          count: 0,
-        };
-        break;
-
-      case 'student':
-        fallbackPayload = {
-          data: [],
-          count: 0,
-        };
-        break;
-
-      case 'task':
-        fallbackPayload = {
-          data: [],
-          count: 0,
-        };
-        break;
+      }
 
       default:
         return NextResponse.json(
@@ -340,11 +400,9 @@ export async function POST(request: NextRequest) {
       case 'worklog': {
         if (!staffId) return NextResponse.json({ error: 'Missing "staffId"' }, { status: 400 });
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        await upsertWorklog(spreadsheetId, staffId, data as WorklogRow);
-        serverCache.invalidate(`worklog:${branchCode}:${staffId}`);
 
+        const w = data as WorklogRow;
         try {
-          const w = data as WorklogRow;
           await syncWorklogToFirestore({
             id: w.logId || `WL_${staffId}_${Date.now()}`,
             userId: staffId,
@@ -360,23 +418,30 @@ export async function POST(request: NextRequest) {
             hoursLogged: parseFloat(w.totalHours) || 8.5
           });
         } catch (fsErr) {
-          console.warn('[Sheets/POST/worklog] Firestore sync note:', fsErr);
+          console.warn('[Sheets/POST/worklog] Firestore primary write note:', fsErr);
         }
 
-        return NextResponse.json({ success: true, message: 'Worklog saved.' });
+        serverCache.invalidate(`worklog:${branchCode}:${staffId}`);
+
+        // Non-blocking Sheets projection with timeout race
+        Promise.race([
+          upsertWorklog(spreadsheetId, staffId, data as WorklogRow),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Sheet projection timeout')), 3500))
+        ]).catch(sheetErr => {
+          console.warn('[Sheets/POST/worklog] Non-blocking Sheets projection note:', sheetErr?.message || sheetErr);
+        });
+
+        return NextResponse.json({ success: true, message: 'Worklog saved to primary database.' });
       }
 
       case 'student': {
         if (!staffId) return NextResponse.json({ error: 'Missing "staffId"' }, { status: 400 });
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        await upsertStudent(spreadsheetId, staffId, data as StudentRow);
-        serverCache.invalidate(`student:${branchCode}:${staffId}`);
-        serverCache.invalidate(`branch_student_directory:${branchCode}`);
 
+        const s = data as StudentRow;
         try {
-          const s = data as StudentRow;
           await syncStudentToFirestore({
-            studentId: s.studentId,
+            studentId: s.studentId || `STU_${Date.now()}`,
             studentName: s.studentName,
             branch: branchCode,
             college: s.college,
@@ -395,23 +460,32 @@ export async function POST(request: NextRequest) {
             studentStatus: s.studentStatus
           });
         } catch (fsErr) {
-          console.warn('[Sheets/POST/student] Firestore sync note:', fsErr);
+          console.warn('[Sheets/POST/student] Firestore primary write note:', fsErr);
         }
 
-        return NextResponse.json({ success: true, message: 'Student record saved.' });
+        serverCache.invalidate(`student:${branchCode}:${staffId}`);
+        serverCache.invalidate(`branch_student_directory:${branchCode}`);
+
+        // Non-blocking Sheets projection with timeout race
+        Promise.race([
+          upsertStudent(spreadsheetId, staffId, data as StudentRow),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Sheet projection timeout')), 3500))
+        ]).catch(sheetErr => {
+          console.warn('[Sheets/POST/student] Non-blocking Sheets projection note:', sheetErr?.message || sheetErr);
+        });
+
+        return NextResponse.json({ success: true, message: 'Student record saved to primary database.' });
       }
 
       case 'branch_student_directory': {
         if (!['superadmin', 'admin', 'hr', 'SUPER_ADMIN', 'ADMIN', 'HR'].includes(session.role)) {
           return NextResponse.json({ error: 'Forbidden — admin/HR only' }, { status: 403 });
         }
-        await upsertBranchStudent(spreadsheetId, data as BranchStudentRow);
-        serverCache.invalidate(`branch_student_directory:${branchCode}`);
 
+        const b = data as BranchStudentRow;
         try {
-          const b = data as BranchStudentRow;
           await syncStudentToFirestore({
-            studentId: b.studentId,
+            studentId: b.studentId || `STU_${Date.now()}`,
             studentName: b.studentName,
             branch: branchCode,
             college: b.college,
@@ -430,20 +504,28 @@ export async function POST(request: NextRequest) {
             studentStatus: b.studentStatus
           });
         } catch (fsErr) {
-          console.warn('[Sheets/POST/branch_student_directory] Firestore sync note:', fsErr);
+          console.warn('[Sheets/POST/branch_student_directory] Firestore primary write note:', fsErr);
         }
 
-        return NextResponse.json({ success: true, message: 'Branch student record saved.' });
+        serverCache.invalidate(`branch_student_directory:${branchCode}`);
+
+        // Non-blocking Sheets projection with timeout race
+        Promise.race([
+          upsertBranchStudent(spreadsheetId, data as BranchStudentRow),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Sheet projection timeout')), 3500))
+        ]).catch(sheetErr => {
+          console.warn('[Sheets/POST/branch_student_directory] Non-blocking Sheets projection note:', sheetErr?.message || sheetErr);
+        });
+
+        return NextResponse.json({ success: true, message: 'Branch student record saved to primary database.' });
       }
 
       case 'task': {
         if (!staffId) return NextResponse.json({ error: 'Missing "staffId"' }, { status: 400 });
         if (!canAccessStaffData(session, staffId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        await upsertTask(spreadsheetId, staffId, data as TaskRow);
-        serverCache.invalidate(`task:${branchCode}:${staffId}`);
 
+        const t = data as TaskRow;
         try {
-          const t = data as TaskRow;
           await syncTaskToFirestore({
             id: t.taskId,
             title: t.taskTitle,
@@ -457,10 +539,20 @@ export async function POST(request: NextRequest) {
             createdAt: t.dateAssigned || new Date().toISOString()
           });
         } catch (fsErr) {
-          console.warn('[Sheets/POST/task] Firestore sync note:', fsErr);
+          console.warn('[Sheets/POST/task] Firestore primary write note:', fsErr);
         }
 
-        return NextResponse.json({ success: true, message: 'Task saved.' });
+        serverCache.invalidate(`task:${branchCode}:${staffId}`);
+
+        // Non-blocking Sheets projection with timeout race
+        Promise.race([
+          upsertTask(spreadsheetId, staffId, data as TaskRow),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Sheet projection timeout')), 3500))
+        ]).catch(sheetErr => {
+          console.warn('[Sheets/POST/task] Non-blocking Sheets projection note:', sheetErr?.message || sheetErr);
+        });
+
+        return NextResponse.json({ success: true, message: 'Task saved to primary database.' });
       }
 
       case 'attendance': {

@@ -33,11 +33,35 @@ export async function GET(req: NextRequest) {
   const dateParam = isToday ? liveInfo.isoDate : searchParams.get('date') || undefined;
 
   try {
-    const logs = getWorkLogs(session.user, {
+    // 1. Authoritative Firestore Fetch
+    let firestoreLogs: any[] = [];
+    try {
+      const { getFirestoreWorklogs } = await import('@/lib/firebase/firebase-admin');
+      firestoreLogs = await getFirestoreWorklogs({
+        userId: targetUserId || session.user.id,
+        branch: branchParam,
+        date: dateParam
+      });
+    } catch (fsErr) {
+      console.warn('[Worklogs/GET] Firestore fetch note:', fsErr);
+    }
+
+    // 2. In-memory logs
+    const inMemLogs = getWorkLogs(session.user, {
       targetUserId: targetUserId || session.user.id,
       branch: branchParam,
       date: dateParam,
     });
+
+    // 3. Deduplicate by log ID or userId+date with Firestore as authority
+    const logMap = new Map<string, any>();
+    for (const l of inMemLogs) {
+      logMap.set(l.id || `${l.userId}_${l.date}`, l);
+    }
+    for (const fl of firestoreLogs) {
+      logMap.set(fl.id || `${fl.userId}_${fl.date}`, fl);
+    }
+    const logs = Array.from(logMap.values());
 
     let summary = null;
     if (targetUserId) {
@@ -168,66 +192,71 @@ export async function POST(req: NextRequest) {
         const semicolonCompleted = serializeTasks(completedTasks);
         const semicolonPlanned = serializeTasks(plannedTasks);
 
-        // Staff personal operational subsheet WL_<ID>
-        await upsertWorklog(spreadsheetId, user.id, {
-          logId: entry.id,
-          date: entry.date,
-          loginTime: entry.loginTime || '',
-          logoutTime: entry.logoutTime || '',
-          tasksCompleted: semicolonCompleted,
-          tasksPending: semicolonPlanned,
-          incompleteReason: body.incompleteReason || '',
-          totalHours: String(entry.hoursLogged ?? 8.5),
-          verifiedBy: 'Self',
-        });
+        await Promise.race([
+          (async () => {
+            // Staff personal operational subsheet WL_<ID>
+            await upsertWorklog(spreadsheetId, user.id, {
+              logId: entry.id,
+              date: entry.date,
+              loginTime: entry.loginTime || '',
+              logoutTime: entry.logoutTime || '',
+              tasksCompleted: semicolonCompleted,
+              tasksPending: semicolonPlanned,
+              incompleteReason: body.incompleteReason || '',
+              totalHours: String(entry.hoursLogged ?? 8.5),
+              verifiedBy: 'Self',
+            });
 
-        // Master 03_Daily_Worklogs
-        await appendBranchDailyWorklog(spreadsheetId, {
-          logId: entry.id,
-          staffId: user.id,
-          staffName: user.name,
-          role: user.role,
-          branchId: branchCode,
-          date: entry.date,
-          loginTime: entry.loginTime || '',
-          logoutTime: entry.logoutTime || '',
-          tasksCompleted: semicolonCompleted,
-          tasksPending: semicolonPlanned,
-          incompleteReason: body.incompleteReason || '',
-          totalHours: entry.hoursLogged ?? 8.5,
-        });
+            // Master 03_Daily_Worklogs
+            await appendBranchDailyWorklog(spreadsheetId, {
+              logId: entry.id,
+              staffId: user.id,
+              staffName: user.name,
+              role: user.role,
+              branchId: branchCode,
+              date: entry.date,
+              loginTime: entry.loginTime || '',
+              logoutTime: entry.logoutTime || '',
+              tasksCompleted: semicolonCompleted,
+              tasksPending: semicolonPlanned,
+              incompleteReason: body.incompleteReason || '',
+              totalHours: entry.hoursLogged ?? 8.5,
+            });
 
-        // Update 04_Staff_Attendance
-        if (action === 'punchOut' && logoutTime) {
-          await punchOutStaffAttendanceRecord(spreadsheetId, {
-            staffId: user.id,
-            staffName: user.name,
-            role: user.role,
-            date: targetDate,
-            day: liveInfo.dayOfWeek,
-            checkOutTime: logoutTime,
-            totalHours: hours,
-            markedBy: 'Self (Punch Out)',
-          });
-        } else if (loginTime) {
-          await upsertStaffAttendanceRecord(spreadsheetId, [
-            attId,
-            targetDate,
-            liveInfo.dayOfWeek,
-            user.id,
-            user.name,
-            user.role,
-            loginTime,
-            logoutTime || '-',
-            String(hours || 0),
-            'Present',
-            'Punch In',
-            new Date().toISOString(),
-          ]);
-        }
+            // Update 04_Staff_Attendance
+            if (action === 'punchOut' && logoutTime) {
+              await punchOutStaffAttendanceRecord(spreadsheetId, {
+                staffId: user.id,
+                staffName: user.name,
+                role: user.role,
+                date: targetDate,
+                day: liveInfo.dayOfWeek,
+                checkOutTime: logoutTime,
+                totalHours: hours,
+                markedBy: 'Self (Punch Out)',
+              });
+            } else if (loginTime) {
+              await upsertStaffAttendanceRecord(spreadsheetId, [
+                attId,
+                targetDate,
+                liveInfo.dayOfWeek,
+                user.id,
+                user.name,
+                user.role,
+                loginTime,
+                logoutTime || '-',
+                String(hours || 0),
+                'Present',
+                'Punch In',
+                new Date().toISOString(),
+              ]);
+            }
+          })(),
+          new Promise((resolve) => setTimeout(resolve, 3500))
+        ]);
       }
     } catch (sheetErr) {
-      console.warn('[Worklogs/POST] Google Sheets sync note:', sheetErr);
+      console.warn('[Worklogs/POST] Google Sheets projection note:', sheetErr);
     }
 
     return NextResponse.json(

@@ -20,27 +20,46 @@ export async function GET(req: NextRequest) {
   }
 
   const { role, id: userId, branch } = session.user;
-  const all = getAllTasks();
 
+  // 1. Authoritative Firestore Fetch
+  let firestoreTasks: any[] = [];
+  try {
+    const { getFirestoreTasks } = await import('@/lib/firebase/firebase-admin');
+    firestoreTasks = await getFirestoreTasks({ role, userId, branch });
+  } catch (err) {
+    console.warn('[Tasks/GET] Firestore fetch notice:', err);
+  }
+
+  // 2. In-memory fallback / merge
+  const inMemAll = getAllTasks();
+  let filteredInMem: any[] = [];
   if (role === 'superadmin') {
-    // Super Admin can see all tasks
-    return NextResponse.json({ tasks: all });
-  }
-
-  if (role === 'admin') {
-    // Admin can see tasks created by them, or tasks targeting their branch
-    const adminTasks = all.filter(
+    filteredInMem = inMemAll;
+  } else if (role === 'admin') {
+    filteredInMem = inMemAll.filter(
       (t) =>
-        t.assignedBy.id === userId ||
+        t.assignedBy?.id === userId ||
         (t.targetGroup?.branch === branch) ||
-        t.assignedToUserIds.includes(userId)
+        t.assignedToUserIds?.includes(userId)
     );
-    return NextResponse.json({ tasks: adminTasks });
+  } else {
+    filteredInMem = getTasksForUser(userId);
   }
 
-  // HR, Employee, Intern: see tasks assigned to them
-  const myTasks = getTasksForUser(userId);
-  return NextResponse.json({ tasks: myTasks });
+  // 3. Deduplicate by ID with Firestore as source of truth
+  const taskMap = new Map<string, any>();
+  for (const t of filteredInMem) {
+    taskMap.set(t.id, t);
+  }
+  for (const ft of firestoreTasks) {
+    taskMap.set(ft.id, ft);
+  }
+
+  const tasks = Array.from(taskMap.values()).sort(
+    (a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')
+  );
+
+  return NextResponse.json({ tasks });
 }
 
 export async function POST(req: NextRequest) {
@@ -49,8 +68,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Only Admin and Super Admin can assign tasks per user requirement:
-  // "also the Admin and Super Admin can assign task for HR, Employee and Intern"
+  // Only Admin and Super Admin can assign tasks
   if (!['superadmin', 'admin'].includes(session.user.role)) {
     return NextResponse.json(
       { error: 'Forbidden: Only Admin and Super Admin can assign tasks.' },
@@ -100,7 +118,7 @@ export async function POST(req: NextRequest) {
       dueDate: dueDate || ''
     });
 
-    // 1. Dual persistence: Sync to Firebase Firestore
+    // 1. Authoritative Firestore Persistence
     try {
       await syncTaskToFirestore({
         id: newTask.id,
@@ -109,17 +127,41 @@ export async function POST(req: NextRequest) {
         assignedBy: newTask.assignedBy,
         targetType: newTask.targetType,
         targetUserId: newTask.targetUserId,
+        targetUserName: newTask.targetUserName,
+        targetUserRole: newTask.targetUserRole,
         targetGroup: newTask.targetGroup,
+        assignedToUserIds: newTask.assignedToUserIds,
         priority: newTask.priority,
         dueDate: newTask.dueDate,
         status: newTask.status,
         createdAt: newTask.createdAt
       });
+
+      // Also persist notifications to Firestore
+      const { syncNotificationToFirestore } = await import('@/lib/firebase/firebase-admin');
+      for (const recipientId of newTask.assignedToUserIds) {
+        const isGroup = newTask.targetType === 'group';
+        await syncNotificationToFirestore({
+          id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          recipientId,
+          title: isGroup
+            ? `Team Task: ${newTask.targetGroup?.name}`
+            : 'New Task Assigned to You',
+          message: isGroup
+            ? `${newTask.assignedBy.name} (${newTask.assignedBy.role}) assigned team task for ${newTask.targetGroup?.name}: "${newTask.title}"`
+            : `${newTask.assignedBy.name} (${newTask.assignedBy.role}) assigned you task: "${newTask.title}"`,
+          type: isGroup ? 'team_task' : 'task_assigned',
+          taskId: newTask.id,
+          teamName: isGroup ? newTask.targetGroup?.name : undefined,
+          isRead: false,
+          createdAt: newTask.createdAt
+        });
+      }
     } catch (fsErr) {
       console.warn('[Tasks/POST] Firestore sync note:', fsErr);
     }
 
-    // 2. Dual persistence: Sync to Google Sheets (Master 05_Task_Allocation + Staff TSK_<ID> tab)
+    // 2. Non-blocking Google Sheets projection
     try {
       const branchName = session.user.branch;
       const branchCode = BRANCH_NAME_TO_CODE[branchName];
@@ -129,48 +171,53 @@ export async function POST(req: NextRequest) {
         const todayStr = new Date().toISOString().split('T')[0];
         const assignedToName = targetUserId || targetGroup?.name || 'Assigned Staff';
         
-        // Master 05_Task_Allocation
-        await appendBranchTaskAllocation(spreadsheetId, {
-          taskId: newTask.id,
-          dateAssigned: todayStr,
-          assignedById: session.user.id,
-          assignedByName: session.user.name,
-          assignedToId: targetUserId || 'GROUP',
-          assignedToName,
-          taskTitle: newTask.title,
-          description: newTask.description,
-          priority: newTask.priority,
-          category: 'Operations',
-          startDate: todayStr,
-          dueDate: newTask.dueDate || todayStr,
-          completedDate: '-',
-          status: newTask.status,
-          progressPct: '0%',
-          remarks: ''
-        });
+        await Promise.race([
+          (async () => {
+            // Master 05_Task_Allocation
+            await appendBranchTaskAllocation(spreadsheetId, {
+              taskId: newTask.id,
+              dateAssigned: todayStr,
+              assignedById: session.user.id,
+              assignedByName: session.user.name,
+              assignedToId: targetUserId || 'GROUP',
+              assignedToName,
+              taskTitle: newTask.title,
+              description: newTask.description,
+              priority: newTask.priority,
+              category: 'Operations',
+              startDate: todayStr,
+              dueDate: newTask.dueDate || todayStr,
+              completedDate: '-',
+              status: newTask.status,
+              progressPct: '0%',
+              remarks: ''
+            });
 
-        // Dedicated operational subsheet TSK_<ID> if individual assignment
-        if (targetUserId) {
-          await upsertTask(spreadsheetId, targetUserId, {
-            taskId: newTask.id,
-            dateAssigned: todayStr,
-            assignedById: session.user.id,
-            assignedByName: session.user.name,
-            taskTitle: newTask.title,
-            description: newTask.description,
-            priority: (newTask.priority?.charAt(0).toUpperCase() + newTask.priority?.slice(1)) as any,
-            category: 'Operations',
-            startDate: todayStr,
-            dueDate: newTask.dueDate || todayStr,
-            completedDate: '-',
-            status: 'Assigned',
-            progressPct: '0%',
-            remarks: ''
-          });
-        }
+            // Dedicated operational subsheet TSK_<ID> if individual assignment
+            if (targetUserId) {
+              await upsertTask(spreadsheetId, targetUserId, {
+                taskId: newTask.id,
+                dateAssigned: todayStr,
+                assignedById: session.user.id,
+                assignedByName: session.user.name,
+                taskTitle: newTask.title,
+                description: newTask.description,
+                priority: (newTask.priority?.charAt(0).toUpperCase() + newTask.priority?.slice(1)) as any,
+                category: 'Operations',
+                startDate: todayStr,
+                dueDate: newTask.dueDate || todayStr,
+                completedDate: '-',
+                status: 'Assigned',
+                progressPct: '0%',
+                remarks: ''
+              });
+            }
+          })(),
+          new Promise((resolve) => setTimeout(resolve, 3500))
+        ]);
       }
     } catch (sheetErr) {
-      console.warn('[Tasks/POST] Google Sheets sync note:', sheetErr);
+      console.warn('[Tasks/POST] Google Sheets projection note:', sheetErr);
     }
 
     return NextResponse.json({ task: newTask }, { status: 201 });
@@ -196,21 +243,10 @@ export async function PATCH(req: NextRequest) {
 
     const updated = updateTaskStatus(taskId, status);
 
-    // Sync updated task to Firestore
+    // Sync updated task to Firestore authoritatively
     try {
-      await syncTaskToFirestore({
-        id: updated.id,
-        title: updated.title,
-        description: updated.description,
-        assignedBy: updated.assignedBy,
-        targetType: updated.targetType,
-        targetUserId: updated.targetUserId,
-        targetGroup: updated.targetGroup,
-        priority: updated.priority,
-        dueDate: updated.dueDate,
-        status: updated.status,
-        createdAt: updated.createdAt
-      });
+      const { updateFirestoreTaskStatus } = await import('@/lib/firebase/firebase-admin');
+      await updateFirestoreTaskStatus(taskId, status);
     } catch (fsErr) {
       console.warn('[Tasks/PATCH] Firestore sync note:', fsErr);
     }
