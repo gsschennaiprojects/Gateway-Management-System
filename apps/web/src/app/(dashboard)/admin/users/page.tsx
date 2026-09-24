@@ -24,6 +24,9 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
+  Eye,
+  EyeOff,
+  Key,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
 
@@ -35,13 +38,32 @@ export default function UserManagementPage() {
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [branchFilter, setBranchFilter] = useState<string>('all');
 
-  // Double confirmation modal states
+  // Password visibility state for Super Admin
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
+  const togglePassword = (userId: string) => {
+    setRevealedPasswords((prev) => ({ ...prev, [userId]: !prev[userId] }));
+  };
+
+  // Double confirmation & Edit modal states
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [modalAction, setModalAction] = useState<'role_change' | 'delete' | null>(null);
+  const [modalAction, setModalAction] = useState<'role_change' | 'delete' | 'edit_staff' | null>(null);
   const [targetRole, setTargetRole] = useState<UserRole>('intern');
   const [confirmPhrase, setConfirmPhrase] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Edit Staff Form State (Super Admin Exclusive)
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    email: '',
+    mobile: '',
+    branch: 'Coimbatore' as Branch,
+    role: 'employee' as UserRole,
+    status: 'active' as any,
+    specialization: '',
+    password: '',
+  });
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -82,6 +104,56 @@ export default function UserManagementPage() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const openEditStaffModal = (user: User) => {
+    setSelectedUser(user);
+    setModalAction('edit_staff');
+    setEditFormData({
+      name: user.name || '',
+      email: user.email || '',
+      mobile: user.mobile || '',
+      branch: (user.branch as Branch) || 'Coimbatore',
+      role: user.role,
+      status: user.status,
+      specialization: user.specialization || '',
+      password: user.password || '',
+    });
+    setShowEditPassword(false);
+    setActionError(null);
+  };
+
+  const handleEditStaffSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser) return;
+
+    setIsProcessing(true);
+    setActionError(null);
+    try {
+      const res = await fetch('/api/auth/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: selectedUser.id,
+          action: 'edit_staff',
+          ...editFormData,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setActionError(data.error || 'Failed to update staff data');
+        return;
+      }
+
+      closeModal();
+      fetchUsers();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Operation failed';
+      setActionError(msg);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -141,6 +213,8 @@ export default function UserManagementPage() {
 
   const isSuperAdmin = currentUser?.role === 'superadmin';
   const isAdmin = currentUser?.role === 'admin';
+  // ONLY Super Admin is authorized to edit any data of staff
+  const canEditStaff = isSuperAdmin;
 
   const filteredUsers = users.filter((u) => {
     const matchesSearch =
@@ -399,14 +473,13 @@ export default function UserManagementPage() {
                 <th className="py-3 px-4">Role</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4">Contact</th>
+                {isSuperAdmin && <th className="py-3 px-4">Password</th>}
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-subtle)] text-xs">
               {filteredUsers.map((u) => {
                 const isPending = u.status === 'pending';
-                const canEditRole =
-                  isSuperAdmin || (isAdmin && u.branch === currentUser?.branch && u.role !== 'superadmin');
 
                 return (
                   <tr
@@ -476,7 +549,30 @@ export default function UserManagementPage() {
                       <div className="text-[var(--text-muted)] text-[11px]">{u.mobile}</div>
                     </td>
 
-                    {/* Actions */}
+                    {/* Password — Super Admin Exclusive Visibility */}
+                    {isSuperAdmin && (
+                      <td className="py-3.5 px-4 font-mono text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="bg-[var(--bg-card-subtle)] px-2.5 py-1 rounded-lg border border-[var(--border-card)] text-[var(--brand-primary)] font-medium text-[11px] select-all">
+                            {revealedPasswords[u.id] ? (u.password || '••••••••') : '••••••••'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => togglePassword(u.id)}
+                            className="p-1.5 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                            title={revealedPasswords[u.id] ? 'Hide password' : 'View staff password'}
+                          >
+                            {revealedPasswords[u.id] ? (
+                              <EyeOff className="w-3.5 h-3.5 text-amber-500" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    )}
+
+                    {/* Actions — ONLY Super Admin can edit any data of staff */}
                     <td className="py-3.5 px-4 text-right">
                       {isPending ? (
                         <div className="inline-flex items-center gap-2">
@@ -495,11 +591,11 @@ export default function UserManagementPage() {
                         </div>
                       ) : (
                         <div className="inline-flex items-center gap-1.5">
-                          {canEditRole && (
+                          {canEditStaff && (
                             <button
-                              onClick={() => openModal(u, 'role_change')}
-                              className="p-1.5 rounded-full hover:bg-[var(--bg-card-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
-                              title="Assign / Change Role"
+                              onClick={() => openEditStaffModal(u)}
+                              className="p-1.5 rounded-full hover:bg-[var(--brand-container)] text-[var(--text-secondary)] hover:text-[var(--brand-primary)] transition-colors cursor-pointer"
+                              title="Edit Staff Data (Super Admin Exclusive)"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
@@ -524,8 +620,166 @@ export default function UserManagementPage() {
         </div>
       </div>
 
-      {/* Double Confirmation Modal */}
-      {selectedUser && modalAction && (
+      {/* Edit Staff Modal — Super Admin Master Control */}
+      {selectedUser && modalAction === 'edit_staff' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-panel-entrance">
+          <div className="bg-[var(--bg-card)] border border-[var(--border-card)] rounded-2xl w-full max-w-lg p-6 shadow-2xl relative text-[var(--text-primary)] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-[var(--border-subtle)]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--brand-container)] text-[var(--brand-primary)] flex items-center justify-center">
+                  <Edit2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-[var(--text-primary)]">
+                    Edit Staff Information
+                  </h3>
+                  <p className="text-xs text-[var(--text-secondary)]">Super Admin Master Control</p>
+                </div>
+              </div>
+              <button
+                onClick={closeModal}
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card-subtle)] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {actionError && (
+              <div className="mb-4 p-3 rounded-xl bg-[var(--badge-danger-bg)] border border-[var(--badge-danger-border)] text-xs text-[var(--badge-danger-text)]">
+                {actionError}
+              </div>
+            )}
+
+            <form onSubmit={handleEditStaffSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-medium text-[var(--text-secondary)] mb-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editFormData.name}
+                  onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                  className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-[var(--text-secondary)] mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={editFormData.email}
+                    onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                    className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-[var(--text-secondary)] mb-1">Mobile Number</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.mobile}
+                    onChange={(e) => setEditFormData({ ...editFormData, mobile: e.target.value })}
+                    className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-medium text-[var(--text-secondary)] mb-1">Branch</label>
+                  <select
+                    value={editFormData.branch}
+                    onChange={(e) => setEditFormData({ ...editFormData, branch: e.target.value as Branch })}
+                    className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
+                  >
+                    {BRANCHES.map((b) => (
+                      <option key={b} value={b}>
+                        {b} Branch
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-medium text-[var(--text-secondary)] mb-1">Role</label>
+                  <select
+                    value={editFormData.role}
+                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as UserRole })}
+                    className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
+                  >
+                    <option value="intern">Intern</option>
+                    <option value="employee">Employee</option>
+                    <option value="hr">HR</option>
+                    <option value="admin">Admin</option>
+                    <option value="superadmin">Super Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-medium text-[var(--text-secondary)] mb-1">Status</label>
+                  <select
+                    value={editFormData.status}
+                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+                    className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
+                  >
+                    <option value="active">Active</option>
+                    <option value="pending">Pending</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-medium text-[var(--text-secondary)] mb-1">Domain / Specialization</label>
+                <input
+                  type="text"
+                  value={editFormData.specialization}
+                  onChange={(e) => setEditFormData({ ...editFormData, specialization: e.target.value })}
+                  className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-[var(--text-secondary)] mb-1 flex items-center justify-between">
+                  <span>Staff Password</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPassword(!showEditPassword)}
+                    className="text-[11px] text-[var(--brand-primary)] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    {showEditPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    {showEditPassword ? 'Hide' : 'Reveal'}
+                  </button>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showEditPassword ? 'text' : 'password'}
+                    value={editFormData.password}
+                    onChange={(e) => setEditFormData({ ...editFormData, password: e.target.value })}
+                    placeholder="Enter or update staff password"
+                    className="w-full h-10 px-3 pr-10 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand-primary)]"
+                  />
+                  <Key className="w-4 h-4 text-[var(--text-muted)] absolute right-3 top-3 pointer-events-none" />
+                </div>
+                <p className="text-[10px] text-[var(--text-muted)] mt-1">
+                  Super Admin can inspect or overwrite this staff member's password directly.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-[var(--border-subtle)]">
+                <Button variant="ghost" size="sm" type="button" onClick={closeModal}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="sm" type="submit" isLoading={isProcessing}>
+                  Save Staff Changes
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Double Confirmation Modal for Delete / Role */}
+      {selectedUser && (modalAction === 'role_change' || modalAction === 'delete') && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-panel-entrance">
           <div className="bg-[var(--bg-card)] border border-[var(--border-card)] rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-[var(--text-primary)]">
             <div className="flex items-center gap-3 mb-4">

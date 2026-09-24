@@ -49,15 +49,19 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const branchParam = searchParams.get('branch');
 
-  // Super Admin can view all branches or filter by branch via query param
+  // Super Admin can view all branches or filter by branch via query param, and view passwords
   if (session.user.role === 'superadmin') {
     const filtered = (branchParam && branchParam !== 'All' && branchParam !== 'all')
       ? allUsers.filter(u => u.branch === branchParam)
       : allUsers;
-    return NextResponse.json({ users: filtered.map(stripSensitive) });
+    const usersWithPassword = filtered.map(u => ({
+      ...stripSensitive(u),
+      password: u.passwordHash || u.password || 'GatewaySS@2013#'
+    }));
+    return NextResponse.json({ users: usersWithPassword });
   }
 
-  // Admin and HR have strictly scoped access to their OWN branch
+  // Admin and HR have strictly scoped access to their OWN branch (NO passwords)
   const branchUsers = allUsers.filter(u => u.branch === session.user.branch);
   return NextResponse.json({ users: branchUsers.map(stripSensitive) });
 }
@@ -68,7 +72,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Only Super Admin and Admin can approve, reject, or assign/change roles
+  // Only Super Admin and Admin can perform user management operations
   if (!['superadmin', 'admin'].includes(session.user.role)) {
     return NextResponse.json({ error: 'Forbidden: Insufficient privileges' }, { status: 403 });
   }
@@ -95,7 +99,8 @@ export async function PATCH(req: NextRequest) {
               status: d?.status || 'pending',
               branch: d?.branch || 'Coimbatore',
               specialization: d?.specialization || 'Operations',
-              createdAt: d?.createdAt || new Date().toISOString()
+              createdAt: d?.createdAt || new Date().toISOString(),
+              passwordHash: d?.password || d?.passwordHash || undefined
             } as any;
           }
         }
@@ -106,6 +111,98 @@ export async function PATCH(req: NextRequest) {
 
     if (!target) {
       return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
+    }
+
+    // Comprehensive staff editing — ONLY Super Admin is authorized to edit staff data
+    if (action === 'edit_staff') {
+      if (session.user.role !== 'superadmin') {
+        return NextResponse.json(
+          { error: 'Forbidden: Only Super Admin is authorized to edit staff data' },
+          { status: 403 }
+        );
+      }
+
+      const {
+        name,
+        email,
+        mobile,
+        branch,
+        role: newRole,
+        status: newStatus,
+        specialization,
+        password: newPassword
+      } = body;
+
+      if (name && typeof name === 'string') target.name = name.trim();
+      if (email && typeof email === 'string') target.email = email.trim().toLowerCase();
+      if (mobile && typeof mobile === 'string') target.mobile = mobile.trim();
+      if (branch && typeof branch === 'string') target.branch = branch as any;
+      if (newRole && typeof newRole === 'string') target.role = newRole as any;
+      if (newStatus && typeof newStatus === 'string') target.status = newStatus as any;
+      if (specialization !== undefined) target.specialization = specialization;
+      if (newPassword && typeof newPassword === 'string' && newPassword.length >= 6) {
+        target.passwordHash = newPassword;
+      }
+
+      const { upsertServerUser } = await import('@/lib/auth/user-store');
+      upsertServerUser(target);
+
+      try {
+        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
+        await syncUserToFirestore({
+          id: target.id,
+          name: target.name,
+          email: target.email,
+          mobile: target.mobile,
+          role: target.role,
+          status: target.status,
+          branch: target.branch,
+          specialization: target.specialization,
+          specializations: target.specializations,
+          startMonthYear: target.startMonthYear,
+          startDate: target.startDate,
+          endDate: target.endDate,
+          password: target.passwordHash,
+          createdAt: target.createdAt
+        });
+      } catch (fsErr) {
+        console.warn('[Users/edit_staff] Firestore sync note:', fsErr);
+      }
+
+      try {
+        const branchCode = BRANCH_NAME_TO_CODE[target.branch];
+        const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
+        if (spreadsheetId) {
+          const { upsertStaffDirectory, createStaffSubsheets } = await import('@/lib/sheets/sheets-service');
+          await upsertStaffDirectory(spreadsheetId, {
+            staffId: target.id,
+            fullName: target.name,
+            role: target.role,
+            designation: target.specialization || target.role,
+            department: 'Operations',
+            email: target.email,
+            mobile: target.mobile,
+            joiningDate: target.startDate || new Date().toISOString().split('T')[0],
+            reportingManager: 'Management',
+            accountStatus: target.status === 'active' ? 'Active' : target.status === 'rejected' ? 'Rejected' : 'Pending',
+            firebaseUid: target.id
+          });
+
+          if (target.status === 'active') {
+            await createStaffSubsheets(spreadsheetId, target.id, target.name, target.role);
+          }
+        }
+      } catch (sheetErr) {
+        console.warn('[Users/edit_staff] Sheet sync note:', sheetErr);
+      }
+
+      return NextResponse.json({
+        success: true,
+        user: {
+          ...stripSensitive(target),
+          password: target.passwordHash
+        }
+      });
     }
 
     // Enforce branch isolation for Admin
@@ -193,11 +290,10 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (action === 'update_role' && role) {
-      // Both Super Admin (any branch) and Admin (their branch) can assign and change roles!
-      // Admin cannot promote someone to superadmin
-      if (session.user.role === 'admin' && role === 'superadmin') {
+      // ONLY Super Admin can edit staff roles
+      if (session.user.role !== 'superadmin') {
         return NextResponse.json(
-          { error: 'Admins cannot promote users to Super Admin' },
+          { error: 'Forbidden: Only Super Admin is authorized to edit staff roles' },
           { status: 403 }
         );
       }

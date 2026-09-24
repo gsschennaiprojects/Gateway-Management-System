@@ -38,6 +38,7 @@ export interface User {
   endDate?: string;
   createdAt: string;
   avatarUrl?: string;
+  password?: string; // Visible only to Super Admin in User Management
 }
 
 export interface AuthSession {
