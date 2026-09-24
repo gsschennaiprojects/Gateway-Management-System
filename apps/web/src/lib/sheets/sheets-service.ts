@@ -86,42 +86,183 @@ export async function getSheetsApi(): Promise<sheets_v4.Sheets> {
   return sheetsApiInstance;
 }
 
-// ─── Rate Limiter ──────────────────────────────────────────────────────────────
+// ─── Enterprise Google Sheets Quota & Rate-Limiter Manager ──────────────────────
 
-let lastCallTime = 0;
-const MIN_INTERVAL_MS = 1100; // ~54 calls/min, well under the 60/min limit
+/**
+ * Google Cloud Quota Limits for Sheets API:
+ * - 300 requests per minute per project (Global Hard Limit)
+ * - 60 requests per minute per user/service account
+ * 
+ * Our Enterprise Protective Thresholds:
+ * - Max Safe Watermark: 240 req/min (80% ceiling, reserving 20% safe buffer)
+ * - Minimum spacing between consecutive requests: 250ms (up to ~240 calls/min)
+ */
+export const GOOGLE_SHEETS_MINUTE_QUOTA = 300;
+export const MAX_SAFE_REQUESTS_PER_MINUTE = 240;
+const BASE_MIN_INTERVAL_MS = 250;
 
-async function rateLimitedCall<T>(fn: () => Promise<T>, label = ''): Promise<T> {
-  const MAX_RETRIES = 3;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      // Enforce minimum interval between calls
-      const now = Date.now();
-      const elapsed = now - lastCallTime;
-      if (elapsed < MIN_INTERVAL_MS) {
-        await new Promise(r => setTimeout(r, MIN_INTERVAL_MS - elapsed));
-      }
-      lastCallTime = Date.now();
+// Rolling 60-second sliding window request timestamps
+const recentRequestTimestamps: number[] = [];
 
-      return await fn();
-    } catch (err: unknown) {
-      const error = err as { message?: string; code?: number };
-      const isQuota = error.message && (
-        error.message.includes('Quota exceeded') ||
-        error.message.includes('rate limit') ||
-        error.code === 429
-      );
-      if (isQuota && attempt < MAX_RETRIES) {
-        const waitMs = Math.pow(2, attempt + 2) * 5000; // 20s, 40s, 80s
-        console.warn(`[SheetsService] Rate limit hit (${label}). Retrying in ${waitMs / 1000}s...`);
-        await new Promise(r => setTimeout(r, waitMs));
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error(`[SheetsService] Max retries exceeded for: ${label}`);
+// Daily cumulative metrics
+let totalDailyRequests = 0;
+let totalThrottled = 0;
+let totalRetries = 0;
+let activeQueueDepth = 0;
+let lastCallTimestamp: string | null = null;
+let lastCallLabel: string | null = null;
+
+// Promise FIFO serialization queue to eliminate concurrent race bursts
+let executionQueue: Promise<unknown> = Promise.resolve();
+
+export interface SheetsQuotaMetrics {
+  requestsInLastMinute: number;
+  maxSafeMinuteLimit: number;
+  googleMinuteQuota: number;
+  minuteUtilizationPercent: number;
+  totalDailyRequests: number;
+  totalThrottled: number;
+  totalRetries: number;
+  activeQueueDepth: number;
+  status: 'HEALTHY' | 'WARNING' | 'THROTTLED';
+  lastCallTimestamp: string | null;
+  lastCallLabel: string | null;
 }
+
+/**
+ * Clean up timestamps older than 60 seconds from the sliding window.
+ */
+function pruneSlidingWindow(): void {
+  const now = Date.now();
+  const cutoff = now - 60000;
+  while (recentRequestTimestamps.length > 0 && recentRequestTimestamps[0] < cutoff) {
+    recentRequestTimestamps.shift();
+  }
+}
+
+/**
+ * Get real-time metrics on Google Sheets API quota utilization.
+ */
+export function getSheetsQuotaMetrics(): SheetsQuotaMetrics {
+  pruneSlidingWindow();
+  const currentCount = recentRequestTimestamps.length;
+  const utilization = Math.round((currentCount / GOOGLE_SHEETS_MINUTE_QUOTA) * 100);
+
+  let status: 'HEALTHY' | 'WARNING' | 'THROTTLED' = 'HEALTHY';
+  if (currentCount >= MAX_SAFE_REQUESTS_PER_MINUTE) {
+    status = 'THROTTLED';
+  } else if (currentCount >= 180) {
+    status = 'WARNING';
+  }
+
+  return {
+    requestsInLastMinute: currentCount,
+    maxSafeMinuteLimit: MAX_SAFE_REQUESTS_PER_MINUTE,
+    googleMinuteQuota: GOOGLE_SHEETS_MINUTE_QUOTA,
+    minuteUtilizationPercent: utilization,
+    totalDailyRequests,
+    totalThrottled,
+    totalRetries,
+    activeQueueDepth,
+    status,
+    lastCallTimestamp,
+    lastCallLabel,
+  };
+}
+
+/**
+ * Reset quota counters (useful for unit testing or scheduled midnight roll).
+ */
+export function resetSheetsQuotaMetrics(): void {
+  recentRequestTimestamps.length = 0;
+  totalDailyRequests = 0;
+  totalThrottled = 0;
+  totalRetries = 0;
+  activeQueueDepth = 0;
+  lastCallTimestamp = null;
+  lastCallLabel = null;
+}
+
+let lastDispatchedTime = 0;
+
+/**
+ * Serialized, rate-limited executor with exponential backoff and jitter for Google Sheets API.
+ */
+async function rateLimitedCall<T>(fn: () => Promise<T>, label = ''): Promise<T> {
+  activeQueueDepth++;
+
+  // Enqueue onto promise chain to serialize concurrent invocations safely
+  const task = executionQueue.then(async () => {
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        pruneSlidingWindow();
+
+        // 1. Sliding window quota backpressure
+        if (recentRequestTimestamps.length >= MAX_SAFE_REQUESTS_PER_MINUTE) {
+          totalThrottled++;
+          const oldest = recentRequestTimestamps[0];
+          const waitTime = Math.max(100, 60000 - (Date.now() - oldest) + 50);
+          console.warn(`[SheetsQuotaManager] Minute watermark reached (${recentRequestTimestamps.length}/${GOOGLE_SHEETS_MINUTE_QUOTA}). Throttling call '${label}' for ${waitTime}ms...`);
+          await new Promise(r => setTimeout(r, waitTime));
+          pruneSlidingWindow();
+        }
+
+        // 2. Minimum interval pacing
+        const now = Date.now();
+        const elapsed = now - lastDispatchedTime;
+        const requiredInterval = recentRequestTimestamps.length > 180 ? 400 : BASE_MIN_INTERVAL_MS;
+
+        if (elapsed < requiredInterval) {
+          await new Promise(r => setTimeout(r, requiredInterval - elapsed));
+        }
+
+        lastDispatchedTime = Date.now();
+        recentRequestTimestamps.push(lastDispatchedTime);
+        totalDailyRequests++;
+        lastCallTimestamp = new Date(lastDispatchedTime).toISOString();
+        lastCallLabel = label;
+
+        return await fn();
+      } catch (err: unknown) {
+        const error = err as { message?: string; code?: number; status?: number };
+        const isQuotaError =
+          error.code === 429 ||
+          error.status === 429 ||
+          (typeof error.message === 'string' && (
+            error.message.includes('Quota exceeded') ||
+            error.message.includes('rate limit') ||
+            error.message.includes('RESOURCE_EXHAUSTED')
+          ));
+
+        if (isQuotaError && attempt < MAX_RETRIES) {
+          totalRetries++;
+          // Exponential backoff with full randomized jitter
+          const baseDelay = Math.min(30000, Math.pow(2, attempt) * 2000);
+          const jitter = Math.floor(Math.random() * 1000);
+          const waitMs = baseDelay + jitter;
+
+          console.warn(`[SheetsQuotaManager] Quota 429 hit for '${label}' (Attempt ${attempt + 1}/${MAX_RETRIES}). Backing off with jitter for ${waitMs}ms...`);
+          await new Promise(r => setTimeout(r, waitMs));
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    throw new Error(`[SheetsQuotaManager] Maximum retries exceeded for call: ${label}`);
+  }).finally(() => {
+    activeQueueDepth = Math.max(0, activeQueueDepth - 1);
+  });
+
+  // Catch errors in the chain so subsequent queue items can still execute
+  executionQueue = task.then(() => {}, () => {});
+
+  return task as Promise<T>;
+}
+
 
 // ─── Core Read/Write Operations ────────────────────────────────────────────────
 
