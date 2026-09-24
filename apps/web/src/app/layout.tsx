@@ -6,6 +6,7 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { SidebarProvider } from '@/context/SidebarContext';
 import { ToastProvider } from '@/components/ui/Toast';
 import { PwaNotificationManager } from '@/components/pwa/PwaNotificationManager';
+import { InspectorGuard } from '@/components/security/InspectorGuard';
 
 const fraunces = Fraunces({
   variable: '--font-fraunces',
@@ -74,6 +75,7 @@ export default function RootLayout({
           <SidebarProvider>
             <AuthProvider>
               <ToastProvider>
+                <InspectorGuard />
                 {children}
                 <PwaNotificationManager />
               </ToastProvider>

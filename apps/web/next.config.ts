@@ -38,6 +38,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   compress: true,
   devIndicators: false,
+  productionBrowserSourceMaps: false,
   httpAgentOptions: {
     keepAlive: true,
   },
