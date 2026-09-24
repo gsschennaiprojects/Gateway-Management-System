@@ -52,15 +52,15 @@ function loadServiceAccountKey(): Record<string, any> | null {
   // 3. Fallback credentials for serverless deployment
   return {
     type: "service_account",
-    project_id: "gateway-management",
-    private_key_id: "a4af33b7e232909aa797fb74cbd2b6fe800a6b39",
-    private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCY7zOqXnkbCJDa\ngxt/O68W7gJeS4agQAWGu73ikk/4ar/1fS6Wt1YYtS2985SROI0OphlxZWLoNI4/\nUTdCYXbV56eV+TEIqlm0gVpaoSlnl83vKNK3GU+It7VejlR4ODOyCXlBGtNDcLGg\nI8Mb67Q4IRVetKBXTubm9kBW5TvpRTdF00zAueEF0ID27QqBPWqBBGMdBX47uwWC\nf+5e1n9i7M4yvcVuW5WPd201lizmv2P3ENOCNNspBJ1Ggu3xtgXmjZp4iGfJwfaj\nuQugLDt+rOapt212RA+ih7WMfYngzEAz1/Km/7HZbqxwHRKoto3Wyp3RDuoaNPVc\nRriXnNuTAgMBAAECggEACDZRXhTRnafW7heRNUKqsxQCcOF5sAblZRKVbo0FxKSo\nJyda25aqWwxLkazP7au4OLD8TRsGdcqbWCoPyhLlaIoWdSwFkTNjOsP2v/Fx1ua6\nFQgU/JEG33lh61sVjRkTfubEVJXQrLPoozKYalo8pLDzbqZLX99+8FMJKcFdzLeo\nsRyiwVvlAmqSGEwEa4ORNdAUDpMCXzbVLDDvt+tuNxGmYqwcEByQBqJgvH0C6St7\nZZkkrqLx6PERBIwG3OLzypfIIUi74oF4ZjBWdTTjX/B1zlWDeU9UC6rn/3vwfO/0\nGlUGF7alLlNh75ORz64oS6898sl2DPQj1ZdxyfoXPQKBgQDHcpoxtYqarLM+LTGS\nfI7k66QT03GtOt9Kt6SLrmZ1ynB9xAs9Q+IaQGtBIyzw7yqbNcBVFtAZM3RNY88U\nn0VWQfcpiHH4mJ3mXWbCWPCaJ/Lj1LLXKAxNN4gCZ3qUTt2zF+EBSRa9fEitj8yr\nCvAevGIxKWXoWs2INoiXeAjSNQKBgQDETFGeOgVumghuT5xB/bky7iPO0lgoYKLE\nTt5A3IKNo5ngQt6DWUOtV7kn5hqRg3oFgMmCFbpKKESydU2/F4GfZLNXRDCuzTyi\nRgBHyKT7itkRNs/QFvJGVAoQ4kLLaVUhUUbxaQKtanS/Ksq7mAGgId+kmv9B2pi5\n5niYJrQvpwKBgHfOEG+BtHN6/+R+c0OiDJfYMGQ0ZBmBvrV8IJxDM4rYAsCZLYMs\nrrnELmkfPxSvJbG8FP9Hx9MLhHYkWTTzA0xwLY7GRmflDRxeyKY/lK+VBaLzlkYF\n6XXMwKdpD0ndIfE9i8wg4kcKTAHt2ix4Uoqz8GvFiVCMkt+ammwaD3ptAoGADs7z\nGUynPEDCgg/fadsKLZ1pdiDIJcOkg8qvWZVJBAZjhVeGEcKaKGmFvkzNlEym1+Nv\nUDDzbMS86fmPc+sCDFQ8c0jho044VMWTH9czGwbOeU35P2l7vXJ5j+yBvXakxW6s\nO2oAmbR+Oi2wPZaqCLqFdJV8zCsBeoS4dEH3NeECgYEAm/fiUlsZ3NgIqneHhN07\nsA44+eHFJ1fjIrzZI6WT6CIYKKhICORyWibxC28Z5u3ulfFribVOqr4xhY/BxbIc\ns8EeCGTHN74V2FZYZwgWHgx6g5kY8dz6gOxpR4XBRzj83OsOzKbGPEs9l96NGKq7\nwPbIlzxdAcB3Tk2bmpcRb6o=\n-----END PRIVATE KEY-----\n",
-    client_email: "firebase-adminsdk-fbsvc@gateway-management.iam.gserviceaccount.com",
-    client_id: "108369956574087342134",
+    project_id: "gss-management-system-eef75",
+    private_key_id: "0b53db1b954a508487ffaf68c4ff1d2d65acf08e",
+    private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDiczqfMLkCqC1K\nK0srHjqNRGkaslXXzVDoYSqnQCpZYnmk7iwFFEevBRf1og+6Em27/wDEBRs3uUTx\n1if08riQnj2s5u6l7HsQ57FRlVkmsuP4OrPuaCQHQI8OswZZA7IfIIAo1TEEB6MJ\n2GE0AW8UImrWkgdP0ocQPtoTNrZoe8N47/D393WUgHCGOUwJNzbCrbMeZkRmyCI4\nab7+aq1lTOK857TzfqsN3y5ZBvxpMsYfAN30xL73dk8qt1SV6HLg41UlN0Z16tqn\nl6q7VzZ/TTwxtiVTqtXg+PRswaDgmgGFeU20LdmKc0VFNlsYmdbG0SByERplhnKd\nfxTV1P9TAgMBAAECggEAbgdmJv5SDt/vbZfepLtB4O0qEp4vRrWMx/SaeHyddyP5\njjFpsygY8ooLi77sXFFi/1MWqKgAgxFi1gzkCkk7c41n01C8CWP/ogWp60WhdUO7\nsBu53K++PcXZHN/QyESa8jPlAbIg6F/bkMeR52aA9ewJNGvs4JSfKr4XUPmnJNl/\nr0e/3Crmjhsy/xdvB/Qm2FMgtXMEAcu0/aQOvNyaZFvxDJXQZCRal9YBgKgEQCEL\nX5Ny39eHI/14SQ5AAY8QcZASXfJniW/lhw24LwVrb+rC5NPDaiO3kEgdzn3nupqi\na/Jy6mw6uQ+kAyQPTLd6PLmbdrS5P08QT6f0WlnanQKBgQD8qe/kXyu49JnqEQxT\noXWKjx9eQnVujEITMqyKNoj9kK4ny+P24GYbxYkLI0norgQheoRmIwVG30bN6phz\njJ8/FaMIdWJ0hWIbxtwki6nrgwQ0VZ0itALiUVkbNrG1yLB2Mkk1HELGDlWI7/D1\nDDX/uqhnrch6zPzjsGtCSrEGHQKBgQDlcK72qYkfCbEcdgQujx2VckA1ipbPuqqI\n51mev2fI3YNK9BxhEGaafvJe8+qg66cj8rr0O8RnyFWLcrlMOdzqrepjUT8fxP1f\nTYbP/kdMZc/QvdIDWhxjIXTH+Vj5To13ONP3cseLkNat+Py4O2v67vIIY779nYsX\nxQLoWxJgLwKBgAXAiKmWURSA3RArGzC8OETTRU+MC8hcgRSWzr7Gxw+ev5hAWAxC\nx5BSSvBp+UDG1Wk9tM3udixK4P3HHXlj9iwlffSvV3J3pugi+tgKJfAqp2nZmR41\nIuusFm88K4eL7hiCxI/k+NAxe1kGvWGWyZPs1/CkUDAbgpZcadS0hpsxAoGBAJo+\naMEWNEKTZ2e0xxbty3uedSAJbV11JhQnQ45/KqxUjmEjPrjaJ8ARO6st2zwXcCOw\nmJJ8Y4tJmIjItV1TQPrbtEjUY9VdvuAE5G6LiS8I+u5fzgHG4HKcGUAelvvzHRNb\nNtSRayieVFRcoLjR6cOmQzv0on8pHEr8fPnrz6ytAoGASjVbT2Kw344EOjoq4Nl8\nnDK83q0pP1HzImvo/5BjClS54iV7SmIuJzIQjCmfz/RdChVXk9COiH2ODN1CrC6C\n7KOZXfEuaII3Yggt9nJx8ypPptkArkP3/GUBeHyR8PdCfuPLSFFTndpxuAGaXDO2\n6oIzMopkzlOfLP8PQSXO/+Y=\n-----END PRIVATE KEY-----\n",
+    client_email: "firebase-adminsdk-fbsvc@gss-management-system-eef75.iam.gserviceaccount.com",
+    client_id: "103905619853685923852",
     auth_uri: "https://accounts.google.com/o/oauth2/auth",
     token_uri: "https://oauth2.googleapis.com/token",
     auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-    client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40gateway-management.iam.gserviceaccount.com",
+    client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40gss-management-system-eef75.iam.gserviceaccount.com",
     universe_domain: "googleapis.com"
   };
 }
@@ -82,7 +82,7 @@ export function getAdminApp(): App | null {
   try {
     adminApp = initializeApp({
       credential: cert(sa),
-      projectId: sa.project_id || 'gateway-management'
+      projectId: sa.project_id || 'gss-management-system-eef75'
     });
     return adminApp;
   } catch (err: any) {
