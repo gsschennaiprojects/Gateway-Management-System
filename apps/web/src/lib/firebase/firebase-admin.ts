@@ -236,12 +236,17 @@ export async function syncWorklogToFirestore(logData: {
       ...logData,
       updatedAt: new Date().toISOString()
     };
-    // Don't overwrite existing createdAt if already set
-    if (!cleanData.createdAt) {
+    Object.keys(cleanData).forEach(k => {
+      if (cleanData[k] === undefined) delete cleanData[k];
+    });
+
+    const docRef = db.collection('daily_worklogs').doc(logData.id);
+    const existing = await docRef.get();
+    if (!existing.exists) {
       cleanData.createdAt = new Date().toISOString();
     }
 
-    await db.collection('daily_worklogs').doc(logData.id).set(cleanData, { merge: true });
+    await docRef.set(cleanData, { merge: true });
     return true;
   } catch (err: any) {
     console.error('[FirebaseAdmin] syncWorklogToFirestore error:', err?.message || err);
@@ -845,26 +850,47 @@ export async function getFirestoreWorklogs(options?: {
   if (!db) return [];
 
   try {
-    const snap = await db.collection('daily_worklogs').limit(150).get();
+    let query: any = db.collection('daily_worklogs');
+    if (options?.userId) {
+      query = query.where('userId', '==', options.userId);
+    }
+    if (options?.date) {
+      query = query.where('date', '==', options.date);
+    }
+    const snap = await query.limit(200).get();
     let logs = snap.docs.map((doc: any) => ({
       id: doc.id,
       ...doc.data()
     }));
 
-    if (options?.userId) {
-      logs = logs.filter(l => l.userId === options.userId);
-    }
     if (options?.branch && options.branch !== 'all') {
-      logs = logs.filter(l => l.branch === options.branch);
-    }
-    if (options?.date) {
-      logs = logs.filter(l => l.date === options.date);
+      logs = logs.filter((l: any) => l.branch === options.branch);
     }
 
     return logs;
   } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreWorklogs error:', err?.message || err);
-    return [];
+    try {
+      const snap = await db.collection('daily_worklogs').limit(200).get();
+      let logs = snap.docs.map((doc: any) => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      if (options?.userId) {
+        logs = logs.filter((l: any) => l.userId === options.userId);
+      }
+      if (options?.branch && options.branch !== 'all') {
+        logs = logs.filter((l: any) => l.branch === options.branch);
+      }
+      if (options?.date) {
+        logs = logs.filter((l: any) => l.date === options.date);
+      }
+
+      return logs;
+    } catch (fallbackErr: any) {
+      console.error('[FirebaseAdmin] getFirestoreWorklogs error:', fallbackErr?.message || fallbackErr);
+      return [];
+    }
   }
 }
 
