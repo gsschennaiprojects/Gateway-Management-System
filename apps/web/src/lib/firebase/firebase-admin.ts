@@ -92,8 +92,12 @@ export function getAdminApp(): App | null {
   }
 
   try {
+    const formattedSa = {
+      ...sa,
+      private_key: typeof sa.private_key === 'string' ? sa.private_key.replace(/\\n/g, '\n') : sa.private_key
+    };
     adminApp = initializeApp({
-      credential: cert(sa),
+      credential: cert(formattedSa),
       projectId: 'gss-management-system-eef75'
     });
     return adminApp;

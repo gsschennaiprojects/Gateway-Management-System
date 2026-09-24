@@ -232,6 +232,7 @@ export async function PATCH(req: NextRequest) {
           startMonthYear: updated.startMonthYear,
           startDate: updated.startDate,
           endDate: updated.endDate,
+          password: updated.passwordHash || (target as any).password || (target as any).passwordHash,
           createdAt: updated.createdAt
         });
       } catch (fsErr) {
@@ -316,6 +317,7 @@ export async function PATCH(req: NextRequest) {
           startMonthYear: updated.startMonthYear,
           startDate: updated.startDate,
           endDate: updated.endDate,
+          password: updated.passwordHash || (target as any).password || (target as any).passwordHash,
           createdAt: updated.createdAt
         });
       } catch (fsErr) {
