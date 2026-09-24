@@ -6,7 +6,7 @@ export interface StoredUser extends User {
 
 export const INITIAL_USERS: StoredUser[] = [
   {
-    id: 'usr_superadmin_sabarinathan',
+    id: 'GSS_SA_001',
     name: 'SABARINATHAN Muthu',
     email: 'gateway.managercbe@gmail.com',
     mobile: '7397078885',

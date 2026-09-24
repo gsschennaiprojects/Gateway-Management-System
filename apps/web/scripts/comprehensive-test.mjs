@@ -20,7 +20,7 @@ async function test() {
     { method: 'GET', path: '/api/tasks' },
     { method: 'GET', path: '/api/notifications' },
     { method: 'GET', path: '/api/worklogs' },
-    { method: 'GET', path: '/api/sheets?type=worklog&staffId=usr_superadmin_sabarinathan&branchCode=CBE' },
+    { method: 'GET', path: '/api/sheets?type=worklog&staffId=GSS_SA_001&branchCode=CBE' },
     { method: 'GET', path: '/api/sheets?type=branch_student_directory&branchCode=CBE' },
     { method: 'GET', path: '/api/sheets?type=attendance_tracker&staffId=CBE_ADM01&branchCode=CBE&month=2026-09' },
   ];

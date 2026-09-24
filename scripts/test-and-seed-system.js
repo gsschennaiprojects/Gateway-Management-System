@@ -277,7 +277,7 @@ async function main() {
     [
       'TSK_20260921_002',
       '21-09-2026',
-      'usr_superadmin_sabarinathan',
+      'GSS_SA_001',
       'SABARINATHAN Muthu',
       'Audit Sub-Sheet Consistency',
       'Verify that all assigned student directories match enrollment fees in HR records',

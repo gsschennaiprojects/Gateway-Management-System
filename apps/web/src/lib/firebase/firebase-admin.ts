@@ -363,6 +363,44 @@ export async function getFirestoreUserById(id: string): Promise<any | null> {
 }
 
 /**
+ * Generates the next sequential professional User ID (e.g. GSS_SA_001, GSS_ADM_001, GSS_HR_001, GSS_EMP_001, GSS_INT_001).
+ */
+export async function getNextProfessionalUserId(role?: string): Promise<string> {
+  const roleLower = (role || '').toLowerCase();
+  let prefix = 'GSS_EMP_';
+  if (roleLower === 'superadmin') prefix = 'GSS_SA_';
+  else if (roleLower === 'admin') prefix = 'GSS_ADM_';
+  else if (roleLower === 'hr') prefix = 'GSS_HR_';
+  else if (roleLower === 'intern') prefix = 'GSS_INT_';
+  else if (roleLower === 'employee') prefix = 'GSS_EMP_';
+
+  const db = getAdminFirestore();
+  let maxSeq = 0;
+  const regex = new RegExp(`^${prefix}(\\d+)$`);
+
+  if (db) {
+    try {
+      const snap = await db.collection('users').get();
+      for (const doc of snap.docs) {
+        const id = doc.id;
+        const match = id.match(regex);
+        if (match) {
+          const seq = parseInt(match[1], 10);
+          if (!isNaN(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[FirebaseAdmin] Error determining next user ID:', err);
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  return `${prefix}${String(nextSeq).padStart(3, '0')}`;
+}
+
+/**
  * Fetch a user from Firestore `users` collection by email, gmail, mobile, or doc ID.
  */
 export async function getFirestoreUserByIdentifier(identifier: string): Promise<any | null> {

@@ -137,7 +137,7 @@ async function runTestSuite() {
       priority: 'high',
       dueDate: '2026-09-30',
       targetType: 'individual',
-      targetUserId: 'usr_superadmin_sabarinathan',
+      targetUserId: 'GSS_SA_001',
     }),
   });
   assert(createTaskRes.status === 201, 'POST /api/tasks (Create & Assign) returns 201 Created');
@@ -187,7 +187,7 @@ async function runTestSuite() {
   assert(fetchWorklogsRes.status === 200, 'GET /api/worklogs returns 200');
 
   // 3.4 Google Sheets Integration Handlers
-  const sheetWorklogsRes = await request('/api/sheets?type=worklog&staffId=usr_superadmin_sabarinathan&branchCode=CBE', {
+  const sheetWorklogsRes = await request('/api/sheets?type=worklog&staffId=GSS_SA_001&branchCode=CBE', {
     headers: { Cookie: cookieHeader },
   });
   assert(sheetWorklogsRes.status === 200 && sheetWorklogsRes.data?.success === true, 'Sheets worklog handler operational');

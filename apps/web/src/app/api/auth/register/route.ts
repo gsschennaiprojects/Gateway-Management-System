@@ -102,7 +102,20 @@ export async function POST(req: NextRequest) {
     const isSuperAdmin = requestedRole === 'superadmin' || cleanEmail === 'gateway.managercbe@gmail.com';
     const initialStatus = isSuperAdmin ? 'active' : 'pending';
 
+    let professionalId: string | undefined;
+    if (isSuperAdmin) {
+      professionalId = 'GSS_SA_001';
+    } else {
+      try {
+        const { getNextProfessionalUserId } = await import('@/lib/firebase/firebase-admin');
+        professionalId = await getNextProfessionalUserId(requestedRole || 'intern');
+      } catch {
+        // Fallback handled by createUser's generator
+      }
+    }
+
     const newUser = createUser({
+      id: professionalId,
       name,
       email: cleanEmail,
       mobile: cleanMobile,

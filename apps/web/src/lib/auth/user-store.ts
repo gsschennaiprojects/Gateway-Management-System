@@ -28,7 +28,34 @@ export function findUserById(id: string): StoredUser | undefined {
   return serverUsers.find((u) => u.id === id);
 }
 
-export function createUser(payload: RegisterPayload): StoredUser {
+export function generateProfessionalUserId(role?: string, existingUsers?: StoredUser[]): string {
+  const roleLower = (role || '').toLowerCase();
+  let prefix = 'GSS_EMP_';
+  if (roleLower === 'superadmin') prefix = 'GSS_SA_';
+  else if (roleLower === 'admin') prefix = 'GSS_ADM_';
+  else if (roleLower === 'hr') prefix = 'GSS_HR_';
+  else if (roleLower === 'intern') prefix = 'GSS_INT_';
+  else if (roleLower === 'employee') prefix = 'GSS_EMP_';
+
+  const list = existingUsers || serverUsers;
+  let maxSeq = 0;
+  const regex = new RegExp(`^${prefix}(\\d+)$`);
+
+  for (const u of list) {
+    const match = (u.id || '').match(regex);
+    if (match) {
+      const seq = parseInt(match[1], 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  return `${prefix}${String(nextSeq).padStart(3, '0')}`;
+}
+
+export function createUser(payload: RegisterPayload & { id?: string }): StoredUser {
   const existing = findUserByIdentifier(payload.email) || findUserByIdentifier(payload.mobile);
   if (existing) {
     throw new Error('An account with this email or mobile number already exists.');
@@ -47,13 +74,15 @@ export function createUser(payload: RegisterPayload): StoredUser {
 
   const isSuperAdmin = payload.requestedRole === 'superadmin' || payload.email.trim().toLowerCase() === 'gateway.managercbe@gmail.com';
   const initialStatus = isSuperAdmin ? 'active' : 'pending';
+  const assignedRole = isSuperAdmin ? 'superadmin' : (payload.requestedRole || 'intern');
+  const userId = payload.id || (isSuperAdmin ? 'GSS_SA_001' : generateProfessionalUserId(assignedRole, serverUsers));
 
   const newUser: StoredUser = {
-    id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    id: userId,
     name: payload.name.trim(),
     email: payload.email.trim().toLowerCase(),
     mobile: payload.mobile.trim(),
-    role: payload.requestedRole || 'intern',
+    role: assignedRole,
     status: initialStatus,
     branch: payload.branch || 'Coimbatore',
     specialization: major,

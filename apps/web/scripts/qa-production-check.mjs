@@ -87,7 +87,7 @@ async function runQATests() {
       priority: 'high',
       dueDate: '2026-09-30',
       targetType: 'individual',
-      targetUserId: 'usr_superadmin_sabarinathan',
+      targetUserId: 'GSS_SA_001',
     }),
   });
   assert(newTaskRes.status === 201, 'POST /api/tasks (Task Dispatch) HTTP 201 Created');
@@ -101,7 +101,7 @@ async function runQATests() {
   console.log('\n--- 4. Testing Google Sheets Integration Handlers ---');
   
   // Worklogs
-  const worklogSheetRes = await request('/api/sheets?type=worklog&staffId=usr_superadmin_sabarinathan&branchCode=CBE', {
+  const worklogSheetRes = await request('/api/sheets?type=worklog&staffId=GSS_SA_001&branchCode=CBE', {
     headers: { Cookie: cookieHeader },
   });
   assert(worklogSheetRes.status === 200, 'GET /api/sheets (worklog) HTTP 200');
