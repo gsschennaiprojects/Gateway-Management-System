@@ -8,7 +8,10 @@
 const path = require('path');
 const fs = require('fs');
 
-const keyPath = path.join(__dirname, 'management-system-509313-306faa5b0c5e.json');
+let keyPath = path.join(__dirname, 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json');
+if (!fs.existsSync(keyPath)) {
+  keyPath = path.join(__dirname, 'firebase-admin-key.json');
+}
 if (!fs.existsSync(keyPath)) {
   console.error('❌ Service account key not found at:', keyPath);
   process.exit(1);

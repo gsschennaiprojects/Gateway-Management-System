@@ -19,20 +19,26 @@ function loadServiceAccountKey(): Record<string, any> | null {
   // 1. Check environment variable (e.g. on Vercel deployment)
   if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     try {
-      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      if (parsed.project_id === 'gss-management-system-eef75' && parsed.private_key) {
+        return parsed;
+      }
+      console.warn(`[FirebaseAdmin] Ignoring FIREBASE_SERVICE_ACCOUNT_KEY: project_id '${parsed.project_id}' is not authorized. ONLY 'gss-management-system-eef75' is allowed.`);
     } catch (e) {
       console.warn('[FirebaseAdmin] Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY JSON:', e);
     }
   }
 
-  // 2. Candidate local file paths
+  // 2. Candidate local file paths (Strictly gss-management-system-eef75)
   const candidatePaths = [
+    path.join(process.cwd(), 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json'),
+    path.join(process.cwd(), '..', 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json'),
     path.join(process.cwd(), 'firebase-admin-key.json'),
     path.join(process.cwd(), 'apps', 'web', 'firebase-admin-key.json'),
     path.join(process.cwd(), '..', 'firebase-admin-key.json'),
+    'C:/Users/jasva/Desktop/project/GMS/gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json',
     'C:/Users/jasva/Desktop/project/GMS/apps/web/firebase-admin-key.json',
-    'C:/Users/jasva/Desktop/project/GMS/firebase-admin-key.json',
-    'C:/Users/jasva/Downloads/gateway-management-firebase-adminsdk-fbsvc-a4af33b7e2.json'
+    'C:/Users/jasva/Desktop/project/GMS/firebase-admin-key.json'
   ];
 
   for (const p of candidatePaths) {
@@ -40,8 +46,10 @@ function loadServiceAccountKey(): Record<string, any> | null {
       if (fs.existsSync(/*turbopackIgnore: true*/ p)) {
         const content = fs.readFileSync(/*turbopackIgnore: true*/ p, 'utf8');
         const parsed = JSON.parse(content);
-        if (parsed.project_id && parsed.private_key) {
+        if (parsed.project_id === 'gss-management-system-eef75' && parsed.private_key) {
           return parsed;
+        } else if (parsed.project_id && parsed.project_id !== 'gss-management-system-eef75') {
+          console.warn(`[FirebaseAdmin] Rejected non-GSS service account key at ${p} (project: ${parsed.project_id})`);
         }
       }
     } catch {
@@ -79,10 +87,14 @@ export function getAdminApp(): App | null {
     return null;
   }
 
+  if (sa.project_id !== 'gss-management-system-eef75') {
+    throw new Error(`[FirebaseAdmin] Unauthorized database connection rejected. Configured: ${sa.project_id}, Expected: gss-management-system-eef75`);
+  }
+
   try {
     adminApp = initializeApp({
       credential: cert(sa),
-      projectId: sa.project_id || 'gss-management-system-eef75'
+      projectId: 'gss-management-system-eef75'
     });
     return adminApp;
   } catch (err: any) {
