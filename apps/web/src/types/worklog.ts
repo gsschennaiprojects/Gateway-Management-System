@@ -11,8 +11,10 @@ export interface WorkLogEntry {
   logoutTime: string | null; // e.g. "06:30 PM"
   plannedTasks: string[];
   completedTasks: string[];
+  incompleteReason?: string;
   attendanceStatus: 'present' | 'absent' | 'holiday';
   hoursLogged?: number;
+  totalHours?: string | number;
 }
 
 export interface StaffMonthlySummary {

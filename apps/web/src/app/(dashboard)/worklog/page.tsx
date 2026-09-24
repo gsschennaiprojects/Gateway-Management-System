@@ -227,14 +227,25 @@ export default function WorklogPage() {
             <div className="flex items-center gap-2.5 flex-wrap">
               {/* Punch In Action Button */}
               {!loginTime ? (
-                <button
-                  type="button"
-                  onClick={() => punchIn()}
-                  className="px-4 py-2 rounded-full bg-[var(--brand-primary,#1A73E8)] hover:bg-[var(--brand-primary-hover,#1557B0)] text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Log In (Punch In at {liveDate.currentTime})</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => punchIn()}
+                    className="px-4 py-2 rounded-full bg-[var(--brand-primary,#1A73E8)] hover:bg-[var(--brand-primary-hover,#1557B0)] text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Log In (Punch In at {liveDate.currentTime})</span>
+                  </button>
+                  <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full border ${
+                    plannedTasks.map(t => t.trim()).filter(Boolean).length === 0
+                      ? 'bg-[var(--badge-warning-bg,#FEF7E0)] text-[var(--badge-warning-text,#B06000)] border-[var(--badge-warning-border,#FEEFC3)]'
+                      : 'bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border-[var(--badge-success-border,#CEEAD6)]'
+                  }`}>
+                    {plannedTasks.map(t => t.trim()).filter(Boolean).length === 0
+                      ? '⚠ ≥1 Planned Task Required'
+                      : `✓ ${plannedTasks.map(t => t.trim()).filter(Boolean).length} Planned Ready`}
+                  </span>
+                </div>
               ) : (
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)] text-xs font-medium">
@@ -254,14 +265,39 @@ export default function WorklogPage() {
 
               {/* Punch Out Action Button */}
               {loginTime && !logoutTime ? (
-                <button
-                  type="button"
-                  onClick={() => punchOut()}
-                  className="px-4 py-2 rounded-full bg-[var(--badge-danger-text,#D93025)] hover:opacity-90 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Log Out (Punch Out at {liveDate.currentTime})</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => punchOut()}
+                    className="px-4 py-2 rounded-full bg-[var(--badge-danger-text,#D93025)] hover:opacity-90 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Log Out (Punch Out at {liveDate.currentTime})</span>
+                  </button>
+                  {(() => {
+                    const planCount = plannedTasks.map(t => t.trim()).filter(Boolean).length;
+                    const compCount = completedTasks.map(t => t.trim()).filter(Boolean).length;
+                    if (compCount === 0) {
+                      return (
+                        <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-[var(--badge-warning-bg,#FEF7E0)] text-[var(--badge-warning-text,#B06000)] border border-[var(--badge-warning-border,#FEEFC3)]">
+                          ⚠ ≥1 Completed Task Required
+                        </span>
+                      );
+                    }
+                    if (compCount < planCount) {
+                      return (
+                        <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                          ⚠ Reason Required ({compCount}/{planCount})
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)]">
+                        ✓ Ready to Logout ({compCount}/{planCount})
+                      </span>
+                    );
+                  })()}
+                </div>
               ) : logoutTime ? (
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-card-subtle,#F1F3F4)] text-[var(--text-secondary,#5F6368)] border border-[var(--border-subtle,#E8EAED)] text-xs font-medium">
@@ -362,38 +398,60 @@ export default function WorklogPage() {
 
         {/* Task Inputs — Point by Point Format */}
         <div className="space-y-6">
-          {/* Tasks Completed (Point-by-Point) */}
+          {/* Step 1: Planned Tasks (Required for Login) */}
           <TaskPointInput
-            label="Tasks Completed (Deliverables)"
-            sublabel="Enter deliverables point-by-point. Will be saved to Google Sheets as clean semicolon-separated values."
-            points={completedTasks}
-            onChange={setCompletedTasks}
-            placeholder="e.g. Conducted technical interview with candidates; Completed bug fixes on student portal..."
-            icon="completed"
-          />
-
-          {/* Tasks Pending / Planned (Point-by-Point) */}
-          <TaskPointInput
-            label="Tasks Pending / Planned"
-            sublabel="Enter pending tasks point-by-point."
+            label="1. Tasks Planned / Agenda (Required for Login)"
+            sublabel="Enter at least 1 planned deliverable before pressing Log In. Automatically persisted in database."
             points={plannedTasks}
             onChange={setPlannedTasks}
-            placeholder="e.g. Prepare curriculum draft for React course; Review attendance logs..."
+            placeholder="e.g. Conduct interview candidates; Build feature modules; Review bug backlog..."
             icon="pending"
+            disabled={isPunchedOut}
           />
 
-          {/* Reason for Incomplete Tasks (Shown if pending tasks exist) */}
-          {plannedTasks.length > 0 && (
-            <div className="p-4 rounded-2xl bg-[var(--badge-warning-bg,#FEF7E0)]/40 border border-[var(--badge-warning-border,#FEEFC3)] space-y-1.5">
-              <label className="text-xs font-semibold text-[var(--badge-warning-text,#B06000)] flex items-center gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> Reason for Incomplete / Pending Deliverables
-              </label>
+          {/* Step 2: Tasks Completed (Required for Logout) */}
+          <TaskPointInput
+            label="2. Tasks Completed / Deliverables (Required for Logout)"
+            sublabel="Enter deliverables point-by-point before pressing Log Out. Saved to database and Google Sheets."
+            points={completedTasks}
+            onChange={setCompletedTasks}
+            placeholder="e.g. Conducted technical interview; Resolved auth session refresh bugs..."
+            icon="completed"
+            disabled={!loginTime || isPunchedOut}
+          />
+
+          {/* Reason for Incomplete Tasks */}
+          {plannedTasks.map(t => t.trim()).filter(Boolean).length > 0 && (
+            <div className={`p-4 rounded-2xl border space-y-1.5 transition-all ${
+              completedTasks.map(t => t.trim()).filter(Boolean).length < plannedTasks.map(t => t.trim()).filter(Boolean).length
+                ? 'bg-amber-50/70 border-amber-200'
+                : 'bg-[var(--bg-card-subtle,#F8FAFD)] border-[var(--border-subtle,#E8EAED)]'
+            }`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-xs font-semibold text-[var(--text-primary,#1F1F1F)] flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                  Reason for Incomplete / Pending Deliverables
+                </label>
+                {completedTasks.map(t => t.trim()).filter(Boolean).length < plannedTasks.map(t => t.trim()).filter(Boolean).length ? (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300">
+                    * Required before Logout (Completed &lt; Planned)
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Optional (All planned tasks marked completed)
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
-                placeholder="Why are these tasks pending? (e.g. Awaiting client review, scheduled for tomorrow)"
+                placeholder="Why are remaining tasks incomplete? (e.g. Awaiting client review, scheduled for tomorrow)"
                 value={incompleteReason}
                 onChange={(e) => setIncompleteReason(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-card,#DADCE0)] bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary,#1A73E8)]/20 focus:border-[var(--brand-primary,#1A73E8)]"
+                className={`w-full px-3.5 py-2.5 rounded-xl border bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] focus:outline-none focus:ring-2 ${
+                  completedTasks.map(t => t.trim()).filter(Boolean).length < plannedTasks.map(t => t.trim()).filter(Boolean).length && !incompleteReason.trim()
+                    ? 'border-amber-400 focus:ring-amber-400/30'
+                    : 'border-[var(--border-card,#DADCE0)] focus:ring-[var(--brand-primary,#1A73E8)]/20'
+                }`}
               />
             </div>
           )}
@@ -403,13 +461,13 @@ export default function WorklogPage() {
         {error && (
           <div className="flex items-center gap-2 text-xs text-[var(--badge-danger-text,#D93025)] bg-[var(--badge-danger-bg,#FCE8E6)] border border-[var(--badge-danger-border,#FAD2CF)] rounded-xl px-4 py-3">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
+            <span className="font-medium">{error}</span>
           </div>
         )}
         {success && (
           <div className="flex items-center gap-2 text-xs text-[var(--badge-success-text,#137333)] bg-[var(--badge-success-bg,#E6F4EA)] border border-[var(--badge-success-border,#CEEAD6)] rounded-xl px-4 py-3">
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-            <span>{success}</span>
+            <span className="font-medium">{success}</span>
           </div>
         )}
 

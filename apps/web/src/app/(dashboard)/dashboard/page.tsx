@@ -28,6 +28,7 @@ import {
   Calendar,
   Timer,
   Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 import { formatStudentDate } from '@/types/student';
 import { TaskPointInput } from '@/components/worklog/TaskPointInput';
@@ -93,6 +94,10 @@ export default function EmployeeDashboardPage() {
     elapsedTime,
     punchIn,
     punchOut,
+    incompleteReason,
+    setIncompleteReason,
+    error,
+    success,
   } = useDailySession();
 
   // Student Attendance List State
@@ -313,13 +318,24 @@ export default function EmployeeDashboardPage() {
 
           <div className="flex items-center gap-3 flex-wrap">
             {!loginTime ? (
-              <Button
-                variant="primary"
-                onClick={() => punchIn()}
-                leftIcon={<LogIn className="w-4 h-4" />}
-              >
-                Log In (Punch In at {liveDate.currentTime})
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="primary"
+                  onClick={() => punchIn()}
+                  leftIcon={<LogIn className="w-4 h-4" />}
+                >
+                  Log In (Punch In at {liveDate.currentTime})
+                </Button>
+                <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full border ${
+                  plannedTasks.map(t => t.trim()).filter(Boolean).length === 0
+                    ? 'bg-[var(--badge-warning-bg,#FEF7E0)] text-[var(--badge-warning-text,#B06000)] border-[var(--badge-warning-border,#FEEFC3)]'
+                    : 'bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border-[var(--badge-success-border,#CEEAD6)]'
+                }`}>
+                  {plannedTasks.map(t => t.trim()).filter(Boolean).length === 0
+                    ? '⚠ ≥1 Planned Task Required'
+                    : `✓ ${plannedTasks.map(t => t.trim()).filter(Boolean).length} Planned Ready`}
+                </span>
+              </div>
             ) : !logoutTime ? (
               <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="text-xs px-3 py-1.5 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)] font-medium flex items-center gap-1.5">
@@ -339,6 +355,29 @@ export default function EmployeeDashboardPage() {
                 >
                   Log Out (Punch Out at {liveDate.currentTime})
                 </Button>
+                {(() => {
+                  const planCount = plannedTasks.map(t => t.trim()).filter(Boolean).length;
+                  const compCount = completedTasks.map(t => t.trim()).filter(Boolean).length;
+                  if (compCount === 0) {
+                    return (
+                      <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-[var(--badge-warning-bg,#FEF7E0)] text-[var(--badge-warning-text,#B06000)] border border-[var(--badge-warning-border,#FEEFC3)]">
+                        ⚠ ≥1 Completed Task Required
+                      </span>
+                    );
+                  }
+                  if (compCount < planCount) {
+                    return (
+                      <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                        ⚠ Reason Required ({compCount}/{planCount})
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)]">
+                      ✓ Ready to Logout ({compCount}/{planCount})
+                    </span>
+                  );
+                })()}
               </div>
             ) : (
               <div className="flex items-center gap-2 flex-wrap">
@@ -390,8 +429,8 @@ export default function EmployeeDashboardPage() {
         {/* Stacked Task Lists using Point-by-Point Task Builder */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <TaskPointInput
-            label="Planned Tasks (For Today)"
-            sublabel="Log your planned agenda at check-in."
+            label="1. Planned Tasks (Required for Login)"
+            sublabel="Log your planned agenda before check-in. Saved to database."
             points={plannedTasks}
             onChange={setPlannedTasks}
             placeholder="Enter planned task (or paste list)..."
@@ -400,8 +439,8 @@ export default function EmployeeDashboardPage() {
           />
 
           <TaskPointInput
-            label="Completed Deliverables (At Logout)"
-            sublabel="Mark deliverables point-by-point at checkout."
+            label="2. Completed Deliverables (Required for Logout)"
+            sublabel="Mark deliverables point-by-point before checkout."
             points={completedTasks}
             onChange={setCompletedTasks}
             placeholder="Enter completed deliverable..."
@@ -409,6 +448,56 @@ export default function EmployeeDashboardPage() {
             disabled={!loginTime || isPunchedOut}
           />
         </div>
+
+        {/* Reason for Incomplete Tasks on Dashboard */}
+        {plannedTasks.map(t => t.trim()).filter(Boolean).length > 0 && (
+          <div className={`mt-6 p-4 rounded-2xl border space-y-1.5 transition-all ${
+            completedTasks.map(t => t.trim()).filter(Boolean).length < plannedTasks.map(t => t.trim()).filter(Boolean).length
+              ? 'bg-amber-50/70 border-amber-200'
+              : 'bg-[var(--bg-card-subtle,#F8FAFD)] border-[var(--border-subtle,#E8EAED)]'
+          }`}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <label className="text-xs font-semibold text-[var(--text-primary,#1F1F1F)] flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                Reason for Incomplete / Pending Deliverables
+              </label>
+              {completedTasks.map(t => t.trim()).filter(Boolean).length < plannedTasks.map(t => t.trim()).filter(Boolean).length ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300">
+                  * Required before Logout (Completed &lt; Planned)
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Optional (All planned tasks marked completed)
+                </span>
+              )}
+            </div>
+            <input
+              type="text"
+              placeholder="Why are remaining tasks incomplete? (e.g. Awaiting client review, scheduled for tomorrow)"
+              value={incompleteReason}
+              onChange={(e) => setIncompleteReason(e.target.value)}
+              className={`w-full px-3.5 py-2.5 rounded-xl border bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] focus:outline-none focus:ring-2 ${
+                completedTasks.map(t => t.trim()).filter(Boolean).length < plannedTasks.map(t => t.trim()).filter(Boolean).length && !incompleteReason.trim()
+                  ? 'border-amber-400 focus:ring-amber-400/30'
+                  : 'border-[var(--border-card,#DADCE0)] focus:ring-[var(--brand-primary,#1A73E8)]/20'
+              }`}
+            />
+          </div>
+        )}
+
+        {/* Dashboard Status Alerts */}
+        {error && (
+          <div className="mt-4 flex items-center gap-2 text-xs text-[var(--badge-danger-text,#D93025)] bg-[var(--badge-danger-bg,#FCE8E6)] border border-[var(--badge-danger-border,#FAD2CF)] rounded-xl px-4 py-3">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="font-medium">{error}</span>
+          </div>
+        )}
+        {success && (
+          <div className="mt-4 flex items-center gap-2 text-xs text-[var(--badge-success-text,#137333)] bg-[var(--badge-success-bg,#E6F4EA)] border border-[var(--badge-success-border,#CEEAD6)] rounded-xl px-4 py-3">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            <span className="font-medium">{success}</span>
+          </div>
+        )}
       </GlassPanel>
 
       {/* My Students Table in Google Workspace Style */}

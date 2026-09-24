@@ -69,9 +69,22 @@ export async function GET(req: NextRequest) {
     }
 
     // Find today's entry specifically for the active user session
-    const todayLog = logs.find(
+    let todayLog = logs.find(
       (l) => l.userId === (targetUserId || session.user.id) && (l.date === liveInfo.isoDate || l.date === liveInfo.sheetDate)
     ) || null;
+
+    if (!todayLog && isToday) {
+      try {
+        const { getFirestoreWorklogById } = await import('@/lib/firebase/firebase-admin');
+        const exactId = `WL_${targetUserId || session.user.id}_${liveInfo.isoDate.replace(/-/g, '')}`;
+        const exactDoc = await getFirestoreWorklogById(exactId);
+        if (exactDoc) {
+          todayLog = exactDoc;
+        }
+      } catch (e) {
+        console.warn('[Worklogs/GET] Exact today doc lookup note:', e);
+      }
+    }
 
     const workingCalc = todayLog?.loginTime && todayLog?.logoutTime
       ? calculateWorkingTime(todayLog.loginTime, todayLog.logoutTime)
@@ -113,30 +126,86 @@ export async function POST(req: NextRequest) {
     }
 
     const dateKey = targetDate.replace(/-/g, '');
+    const logId = body.logId || `WL_${user.id}_${dateKey}`;
     const attId = `ATT_${user.id}_${dateKey}`;
 
-    // Normalize task points
-    const rawPlanned = body.plannedTasks || body.tasksPending || [];
-    const plannedTasks = parseTasks(rawPlanned);
-
-    const rawCompleted = body.completedTasks || body.tasksCompleted || [];
-    const completedTasks = parseTasks(rawCompleted);
-
-    let loginTime = body.loginTime;
-    let logoutTime = body.logoutTime;
-
-    if (action === 'punchIn') {
-      loginTime = loginTime || liveInfo.currentTime;
-    } else if (action === 'punchOut') {
-      logoutTime = logoutTime || liveInfo.currentTime;
+    // Look up existing entry from Firestore / memory to preserve already saved login state across separate appends
+    let existingEntry: any = null;
+    try {
+      const { getFirestoreWorklogById } = await import('@/lib/firebase/firebase-admin');
+      existingEntry = await getFirestoreWorklogById(logId);
+    } catch {}
+    if (!existingEntry) {
+      const inMem = getWorkLogs(user, { targetUserId: user.id, date: targetDate });
+      existingEntry = inMem.find(l => l.id === logId || l.date === targetDate) || null;
     }
 
-    // Automatically calculate hours if both times are present
-    const workingCalc = loginTime && logoutTime ? calculateWorkingTime(loginTime, logoutTime) : null;
-    const hours = workingCalc ? workingCalc.decimalHours : typeof body.totalHours === 'number' ? body.totalHours : parseFloat(body.totalHours) || 8.5;
+    // Normalize task points
+    const rawPlanned = body.plannedTasks || body.tasksPending || existingEntry?.plannedTasks || [];
+    let plannedTasks = parseTasks(rawPlanned);
 
+    const rawCompleted = body.completedTasks || body.tasksCompleted || existingEntry?.completedTasks || [];
+    let completedTasks = parseTasks(rawCompleted);
+
+    // ── 1. Validation Rules ──────────────────────────────────────────────────
+    if (action === 'punchIn') {
+      if (plannedTasks.length === 0) {
+        return NextResponse.json(
+          { error: 'At least one planned task must be entered before logging in.' },
+          { status: 400 }
+        );
+      }
+    } else if (action === 'punchOut') {
+      if (completedTasks.length === 0) {
+        return NextResponse.json(
+          { error: 'At least one completed task must be entered before logging out.' },
+          { status: 400 }
+        );
+      }
+
+      // Check if completed tasks are fewer than planned tasks
+      if (completedTasks.length < plannedTasks.length) {
+        const reason = (body.incompleteReason || existingEntry?.incompleteReason || '').trim();
+        if (!reason) {
+          return NextResponse.json(
+            {
+              error: `Completed tasks (${completedTasks.length}) are fewer than planned tasks (${plannedTasks.length}). Please provide the reason for incomplete tasks before logging out.`
+            },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    // ── 2. Time & Hours Calculation ──────────────────────────────────────────
+    let loginTime = body.loginTime || existingEntry?.loginTime;
+    let logoutTime = body.logoutTime || existingEntry?.logoutTime;
+
+    if (action === 'punchIn') {
+      loginTime = body.loginTime || liveInfo.currentTime;
+      // Do not set logoutTime on login
+      logoutTime = null;
+    } else if (action === 'punchOut') {
+      logoutTime = body.logoutTime || liveInfo.currentTime;
+      if (!loginTime && existingEntry?.loginTime) {
+        loginTime = existingEntry.loginTime;
+      }
+    }
+
+    // Automatically calculate hours between login and logout
+    const workingCalc = loginTime && logoutTime ? calculateWorkingTime(loginTime, logoutTime) : null;
+    const hours = workingCalc
+      ? workingCalc.decimalHours
+      : (action === 'punchIn' ? 0 : (typeof body.totalHours === 'number' ? body.totalHours : parseFloat(body.totalHours) || 8.5));
+    const totalHoursStr = workingCalc
+      ? workingCalc.formatted
+      : (action === 'punchIn' ? 'Active' : `${hours} hrs`);
+
+    const incompleteReason = body.incompleteReason || existingEntry?.incompleteReason || '';
+
+    // ── 3. Append to In-Memory Store ────────────────────────────────────────
     const entry = addWorkLog({
-      id: body.logId || `WL_${user.id}_${dateKey}`,
+      id: logId,
       userId: user.id,
       userName: user.name,
       userRole: user.role,
@@ -146,11 +215,13 @@ export async function POST(req: NextRequest) {
       logoutTime: logoutTime || null,
       plannedTasks,
       completedTasks,
+      incompleteReason,
       attendanceStatus: body.attendanceStatus || 'present',
       hoursLogged: hours,
+      totalHours: totalHoursStr,
     });
 
-    // 1. Dual persistence: Sync to Firebase Firestore
+    // ── 4. Dual Persistence: Append to Firebase Firestore (Same Document) ───
     try {
       await syncWorklogToFirestore({
         id: entry.id,
@@ -163,8 +234,10 @@ export async function POST(req: NextRequest) {
         logoutTime: entry.logoutTime || '',
         plannedTasks: entry.plannedTasks,
         completedTasks: entry.completedTasks,
+        incompleteReason,
         attendanceStatus: entry.attendanceStatus,
-        hoursLogged: entry.hoursLogged ?? 8.5,
+        hoursLogged: entry.hoursLogged ?? 0,
+        totalHours: totalHoursStr,
       });
 
       // Also sync punch state to Firestore attendance collection
@@ -202,8 +275,8 @@ export async function POST(req: NextRequest) {
               logoutTime: entry.logoutTime || '',
               tasksCompleted: semicolonCompleted,
               tasksPending: semicolonPlanned,
-              incompleteReason: body.incompleteReason || '',
-              totalHours: String(entry.hoursLogged ?? 8.5),
+              incompleteReason,
+              totalHours: totalHoursStr,
               verifiedBy: 'Self',
             });
 
@@ -219,8 +292,8 @@ export async function POST(req: NextRequest) {
               logoutTime: entry.logoutTime || '',
               tasksCompleted: semicolonCompleted,
               tasksPending: semicolonPlanned,
-              incompleteReason: body.incompleteReason || '',
-              totalHours: entry.hoursLogged ?? 8.5,
+              incompleteReason,
+              totalHours: hours,
             });
 
             // Update 04_Staff_Attendance

@@ -96,6 +96,9 @@ export function getAdminFirestore(): Firestore | null {
   const app = getAdminApp();
   if (!app) return null;
   adminDb = getFirestore(app);
+  try {
+    adminDb.settings({ ignoreUndefinedProperties: true });
+  } catch {}
   return adminDb;
 }
 
@@ -200,21 +203,29 @@ export async function syncWorklogToFirestore(logData: {
   userRole: string;
   branch: string;
   date: string;
-  loginTime: string;
-  logoutTime: string;
-  plannedTasks: string[];
-  completedTasks: string[];
-  attendanceStatus: string;
-  hoursLogged: number;
+  loginTime?: string | null;
+  logoutTime?: string | null;
+  plannedTasks?: string[];
+  completedTasks?: string[];
+  incompleteReason?: string;
+  attendanceStatus?: string;
+  hoursLogged?: number;
+  totalHours?: string | number;
 }): Promise<boolean> {
   const db = getAdminFirestore();
   if (!db) return false;
 
   try {
-    await db.collection('daily_worklogs').doc(logData.id).set({
+    const cleanData: Record<string, any> = {
       ...logData,
-      createdAt: new Date().toISOString()
-    }, { merge: true });
+      updatedAt: new Date().toISOString()
+    };
+    // Don't overwrite existing createdAt if already set
+    if (!cleanData.createdAt) {
+      cleanData.createdAt = new Date().toISOString();
+    }
+
+    await db.collection('daily_worklogs').doc(logData.id).set(cleanData, { merge: true });
     return true;
   } catch (err: any) {
     console.error('[FirebaseAdmin] syncWorklogToFirestore error:', err?.message || err);
@@ -241,10 +252,13 @@ export async function syncAttendanceToFirestore(attData: {
   if (!db) return false;
 
   try {
-    await db.collection('attendance').doc(attData.id).set({
-      ...attData,
-      timestamp: new Date().toISOString()
-    }, { merge: true });
+    const cleanData: Record<string, any> = {};
+    for (const [k, v] of Object.entries(attData)) {
+      if (v !== undefined) cleanData[k] = v;
+    }
+    cleanData.timestamp = new Date().toISOString();
+
+    await db.collection('attendance').doc(attData.id).set(cleanData, { merge: true });
     return true;
   } catch (err: any) {
     console.error('[FirebaseAdmin] syncAttendanceToFirestore error:', err?.message || err);
@@ -835,5 +849,27 @@ export async function getFirestoreWorklogs(options?: {
   } catch (err: any) {
     console.error('[FirebaseAdmin] getFirestoreWorklogs error:', err?.message || err);
     return [];
+  }
+}
+
+/**
+ * Fetch a specific Worklog from Firestore `daily_worklogs` collection by ID.
+ */
+export async function getFirestoreWorklogById(id: string): Promise<any | null> {
+  const db = getAdminFirestore();
+  if (!db || !id) return null;
+
+  try {
+    const docSnap = await db.collection('daily_worklogs').doc(id).get();
+    if (docSnap.exists) {
+      return {
+        id: docSnap.id,
+        ...docSnap.data()
+      };
+    }
+    return null;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreWorklogById error:', err?.message || err);
+    return null;
   }
 }

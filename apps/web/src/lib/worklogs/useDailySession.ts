@@ -147,7 +147,11 @@ export function useDailySession() {
           if (parsedPlanned.length > 0) setPlannedTasks(parsedPlanned);
           if (parsedCompleted.length > 0) setCompletedTasks(parsedCompleted);
           if (log.incompleteReason) setIncompleteReason(log.incompleteReason);
-          if (log.hoursLogged) setTotalHours(String(log.hoursLogged));
+          if (log.totalHours) {
+            setTotalHours(String(log.totalHours));
+          } else if (log.hoursLogged) {
+            setTotalHours(String(log.hoursLogged));
+          }
 
           // Sync local storage
           if (storageKey && typeof window !== 'undefined') {
@@ -159,7 +163,7 @@ export function useDailySession() {
                 plannedTasks: parsedPlanned,
                 completedTasks: parsedCompleted,
                 incompleteReason: log.incompleteReason || '',
-                totalHours: String(log.hoursLogged || ''),
+                totalHours: String(log.totalHours || log.hoursLogged || ''),
                 explicitPunch: !!log.loginTime,
               })
             );
@@ -232,74 +236,125 @@ export function useDailySession() {
     [storageKey]
   );
 
-  // ── Action: Punch In (Start Day) ──────────────────────────────────────────
+  // ── Action: Punch In / Log In (Start Day) ──────────────────────────────────
   const punchIn = useCallback(
-    async (customTime?: string) => {
+    async (customTime?: string): Promise<boolean> => {
+      const validPlanned = plannedTasks.map((t) => t.trim()).filter(Boolean);
+      if (validPlanned.length === 0) {
+        setError('At least one planned task must be entered before logging in.');
+        return false;
+      }
+
       const nowInfo = getLiveDateInfo();
       const timeToSet = customTime || nowInfo.currentTime;
 
-      setLoginTime(timeToSet);
-      setIsPunchedIn(true);
       setError(null);
 
-      updateLocalStorage({ loginTime: timeToSet, explicitPunch: true });
-      broadcastSync({ loginTime: timeToSet, isPunchedIn: true });
-
       try {
-        await fetch('/api/worklogs', {
+        const res = await fetch('/api/worklogs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'punchIn',
             loginTime: timeToSet,
             date: nowInfo.isoDate,
-            plannedTasks,
-            completedTasks,
+            plannedTasks: validPlanned,
           }),
         });
-        setSuccess(`Punched in successfully at ${timeToSet}`);
+
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || 'Failed to record login in database.');
+          return false;
+        }
+
+        setLoginTime(timeToSet);
+        setIsPunchedIn(true);
+        setSuccess(`Logged in successfully at ${timeToSet}. Planned tasks appended to database.`);
+
+        updateLocalStorage({ loginTime: timeToSet, plannedTasks: validPlanned, explicitPunch: true });
+        broadcastSync({ loginTime: timeToSet, isPunchedIn: true, plannedTasks: validPlanned });
+        return true;
       } catch (e) {
-        console.warn('[punchIn] Sync note:', e);
+        console.error('[punchIn] Error:', e);
+        setError('Network error: Unable to record login to database.');
+        return false;
       }
     },
-    [plannedTasks, completedTasks, updateLocalStorage, broadcastSync]
+    [plannedTasks, updateLocalStorage, broadcastSync]
   );
 
-  // ── Action: Punch Out (End Day) ────────────────────────────────────────────
+  // ── Action: Punch Out / Log Out (End Day) ──────────────────────────────────
   const punchOut = useCallback(
-    async (customTime?: string) => {
+    async (customTime?: string): Promise<boolean> => {
+      const validCompleted = completedTasks.map((t) => t.trim()).filter(Boolean);
+      if (validCompleted.length === 0) {
+        setError('At least one completed task must be entered before logging out.');
+        return false;
+      }
+
+      const validPlanned = plannedTasks.map((t) => t.trim()).filter(Boolean);
+      if (validCompleted.length < validPlanned.length) {
+        if (!incompleteReason.trim()) {
+          setError(
+            `Completed tasks (${validCompleted.length}) are fewer than planned tasks (${validPlanned.length}). Please provide the reason for incomplete tasks before logging out.`
+          );
+          return false;
+        }
+      }
+
       const nowInfo = getLiveDateInfo();
       const timeToSet = customTime || nowInfo.currentTime;
-
-      const workingCalc = calculateWorkingTime(loginTime, timeToSet);
-      const computedHours = workingCalc ? workingCalc.decimalHours.toFixed(2) : '8.5';
-
-      setLogoutTime(timeToSet);
-      setIsPunchedOut(true);
-      setTotalHours(computedHours);
       setError(null);
 
-      updateLocalStorage({ logoutTime: timeToSet, totalHours: computedHours });
-      broadcastSync({ logoutTime: timeToSet, isPunchedOut: true, totalHours: computedHours });
-
       try {
-        await fetch('/api/worklogs', {
+        const res = await fetch('/api/worklogs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'punchOut',
             loginTime,
             logoutTime: timeToSet,
-            totalHours: computedHours,
             date: nowInfo.isoDate,
-            plannedTasks,
-            completedTasks,
-            incompleteReason,
+            plannedTasks: validPlanned,
+            completedTasks: validCompleted,
+            incompleteReason: incompleteReason.trim(),
           }),
         });
-        setSuccess(`Punched out successfully at ${timeToSet}. Total: ${workingCalc?.formatted || computedHours + ' hrs'}`);
+
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || 'Failed to record logout in database.');
+          return false;
+        }
+
+        const workingCalc = data.workingCalc || calculateWorkingTime(loginTime, timeToSet);
+        const computedHours = workingCalc ? workingCalc.decimalHours.toFixed(2) : '8.5';
+        const formattedTotal = workingCalc ? workingCalc.formatted : `${computedHours} hrs`;
+
+        setLogoutTime(timeToSet);
+        setIsPunchedOut(true);
+        setTotalHours(formattedTotal);
+        setSuccess(`Logged out successfully at ${timeToSet}. Total work duration: ${formattedTotal}`);
+
+        updateLocalStorage({
+          logoutTime: timeToSet,
+          completedTasks: validCompleted,
+          incompleteReason: incompleteReason.trim(),
+          totalHours: formattedTotal,
+        });
+        broadcastSync({
+          logoutTime: timeToSet,
+          isPunchedOut: true,
+          completedTasks: validCompleted,
+          incompleteReason: incompleteReason.trim(),
+          totalHours: formattedTotal,
+        });
+        return true;
       } catch (e) {
-        console.warn('[punchOut] Sync note:', e);
+        console.error('[punchOut] Error:', e);
+        setError('Network error: Unable to record logout to database.');
+        return false;
       }
     },
     [loginTime, plannedTasks, completedTasks, incompleteReason, updateLocalStorage, broadcastSync]
@@ -344,6 +399,29 @@ export function useDailySession() {
     setError(null);
     setSuccess(null);
 
+    const validPlanned = plannedTasks.map((t) => t.trim()).filter(Boolean);
+    const validCompleted = completedTasks.map((t) => t.trim()).filter(Boolean);
+
+    if (loginTime && validPlanned.length === 0) {
+      setError('At least one planned task must be entered before saving worklog.');
+      setSaving(false);
+      return;
+    }
+
+    if (logoutTime && validCompleted.length === 0) {
+      setError('At least one completed task must be entered before saving worklog.');
+      setSaving(false);
+      return;
+    }
+
+    if (logoutTime && validCompleted.length < validPlanned.length && !incompleteReason.trim()) {
+      setError(
+        `Completed tasks (${validCompleted.length}) are fewer than planned tasks (${validPlanned.length}). Please provide the reason for incomplete tasks.`
+      );
+      setSaving(false);
+      return;
+    }
+
     const nowInfo = getLiveDateInfo();
     const workingCalc = calculateWorkingTime(loginTime, logoutTime);
     const computedHours = workingCalc ? workingCalc.decimalHours.toFixed(2) : totalHours || '8.5';
@@ -351,8 +429,8 @@ export function useDailySession() {
     updateLocalStorage({
       loginTime,
       logoutTime,
-      plannedTasks,
-      completedTasks,
+      plannedTasks: validPlanned,
+      completedTasks: validCompleted,
       incompleteReason,
       totalHours: computedHours,
     });
@@ -360,8 +438,8 @@ export function useDailySession() {
     broadcastSync({
       loginTime,
       logoutTime,
-      plannedTasks,
-      completedTasks,
+      plannedTasks: validPlanned,
+      completedTasks: validCompleted,
       incompleteReason,
       totalHours: computedHours,
     });
@@ -375,8 +453,8 @@ export function useDailySession() {
           date: nowInfo.isoDate,
           loginTime,
           logoutTime,
-          plannedTasks,
-          completedTasks,
+          plannedTasks: validPlanned,
+          completedTasks: validCompleted,
           incompleteReason,
           totalHours: computedHours,
         }),

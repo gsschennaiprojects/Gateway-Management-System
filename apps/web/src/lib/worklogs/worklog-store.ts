@@ -83,8 +83,31 @@ export function getStaffMonthlySummary(targetUserId: string): StaffMonthlySummar
 }
 
 export function addWorkLog(entry: Omit<WorkLogEntry, 'id'> & { id?: string }): WorkLogEntry {
+  const targetId = entry.id || `wlg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const existingIndex = serverWorkLogs.findIndex(
+    (l) => l.id === targetId || (l.userId === entry.userId && (l.date === entry.date || l.date.replace(/-/g, '') === entry.date.replace(/-/g, '')))
+  );
+
+  if (existingIndex !== -1) {
+    const existing = serverWorkLogs[existingIndex];
+    const merged: WorkLogEntry = {
+      ...existing,
+      ...entry,
+      id: existing.id || targetId,
+      loginTime: entry.loginTime !== undefined ? entry.loginTime : existing.loginTime,
+      logoutTime: entry.logoutTime !== undefined ? entry.logoutTime : existing.logoutTime,
+      plannedTasks: Array.isArray(entry.plannedTasks) && entry.plannedTasks.length > 0 ? entry.plannedTasks : existing.plannedTasks,
+      completedTasks: Array.isArray(entry.completedTasks) && entry.completedTasks.length > 0 ? entry.completedTasks : existing.completedTasks,
+      incompleteReason: entry.incompleteReason !== undefined ? entry.incompleteReason : existing.incompleteReason,
+      hoursLogged: entry.hoursLogged !== undefined ? entry.hoursLogged : existing.hoursLogged,
+      totalHours: entry.totalHours !== undefined ? entry.totalHours : existing.totalHours,
+    };
+    serverWorkLogs[existingIndex] = merged;
+    return merged;
+  }
+
   const newEntry: WorkLogEntry = {
-    id: entry.id || `wlg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    id: targetId,
     ...entry,
   };
   serverWorkLogs.unshift(newEntry);
