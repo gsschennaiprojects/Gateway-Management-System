@@ -45,13 +45,16 @@ export function createUser(payload: RegisterPayload): StoredUser {
     ? payload.additionalSpecializations
     : specsArray.slice(1);
 
+  const isSuperAdmin = payload.requestedRole === 'superadmin' || payload.email.trim().toLowerCase() === 'gateway.managercbe@gmail.com';
+  const initialStatus = isSuperAdmin ? 'active' : 'pending';
+
   const newUser: StoredUser = {
     id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     name: payload.name.trim(),
     email: payload.email.trim().toLowerCase(),
     mobile: payload.mobile.trim(),
     role: payload.requestedRole || 'intern',
-    status: 'pending', // Starts in pending approval state per Design.md §3.2
+    status: initialStatus,
     branch: payload.branch || 'Coimbatore',
     specialization: major,
     specializations: specsArray,

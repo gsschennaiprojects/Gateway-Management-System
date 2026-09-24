@@ -326,6 +326,116 @@ export async function getFirestoreUsers(): Promise<any[]> {
 }
 
 /**
+ * Fetch a specific user from Firestore `users` collection by ID.
+ */
+export async function getFirestoreUserById(id: string): Promise<any | null> {
+  const db = getAdminFirestore();
+  if (!db || !id) return null;
+
+  try {
+    const docSnap = await db.collection('users').doc(id).get();
+    if (docSnap.exists) {
+      const d = docSnap.data()!;
+      return {
+        id: docSnap.id,
+        name: d.name || 'Staff Member',
+        email: d.email || d.gmail || '',
+        mobile: d.mobile || '',
+        role: (d.role?.toLowerCase() as any) || 'intern',
+        status: (d.status as any) || 'pending',
+        branch: d.branch || 'Coimbatore',
+        specialization: d.specialization || d.designation || 'Operations',
+        specializations: d.specializations || (d.specialization ? [d.specialization] : []),
+        majorSpecialization: d.majorSpecialization || d.specialization || 'Operations',
+        additionalSpecializations: d.additionalSpecializations || [],
+        startMonthYear: d.startMonthYear || '',
+        startDate: d.startDate || '',
+        endDate: d.endDate || '',
+        createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
+        passwordHash: d.password || undefined
+      };
+    }
+    return null;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreUserById error:', err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Fetch a user from Firestore `users` collection by email, gmail, mobile, or doc ID.
+ */
+export async function getFirestoreUserByIdentifier(identifier: string): Promise<any | null> {
+  const db = getAdminFirestore();
+  if (!db || !identifier) return null;
+
+  try {
+    const cleanId = identifier.trim().toLowerCase();
+    const digitsOnly = identifier.replace(/\D/g, '');
+
+    // 1. Check doc ID directly
+    const directDoc = await db.collection('users').doc(identifier).get();
+    if (directDoc.exists) {
+      const d = directDoc.data()!;
+      return {
+        id: directDoc.id,
+        name: d.name || 'Staff Member',
+        email: d.email || d.gmail || cleanId,
+        mobile: d.mobile || '',
+        role: (d.role?.toLowerCase() as any) || 'intern',
+        status: (d.status as any) || 'pending',
+        branch: d.branch || 'Coimbatore',
+        specialization: d.specialization || d.designation || 'Operations',
+        specializations: d.specializations || (d.specialization ? [d.specialization] : []),
+        majorSpecialization: d.majorSpecialization || d.specialization || 'Operations',
+        additionalSpecializations: d.additionalSpecializations || [],
+        startMonthYear: d.startMonthYear || '',
+        startDate: d.startDate || '',
+        endDate: d.endDate || '',
+        createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
+        passwordHash: d.password || undefined
+      };
+    }
+
+    // 2. Query email
+    let snap = await db.collection('users').where('email', '==', cleanId).limit(1).get();
+    if (snap.empty) {
+      snap = await db.collection('users').where('gmail', '==', cleanId).limit(1).get();
+    }
+    if (snap.empty && digitsOnly.length >= 10) {
+      snap = await db.collection('users').where('mobile', '==', digitsOnly.slice(-10)).limit(1).get();
+    }
+
+    if (!snap.empty) {
+      const doc = snap.docs[0];
+      const d = doc.data()!;
+      return {
+        id: doc.id,
+        name: d.name || 'Staff Member',
+        email: d.email || d.gmail || cleanId,
+        mobile: d.mobile || '',
+        role: (d.role?.toLowerCase() as any) || 'intern',
+        status: (d.status as any) || 'pending',
+        branch: d.branch || 'Coimbatore',
+        specialization: d.specialization || d.designation || 'Operations',
+        specializations: d.specializations || (d.specialization ? [d.specialization] : []),
+        majorSpecialization: d.majorSpecialization || d.specialization || 'Operations',
+        additionalSpecializations: d.additionalSpecializations || [],
+        startMonthYear: d.startMonthYear || '',
+        startDate: d.startDate || '',
+        endDate: d.endDate || '',
+        createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
+        passwordHash: d.password || undefined
+      };
+    }
+    return null;
+  } catch (err: any) {
+    console.error('[FirebaseAdmin] getFirestoreUserByIdentifier error:', err?.message || err);
+    return null;
+  }
+}
+
+/**
  * Permanently delete a user from Firestore `users` collection by ID, email, or mobile.
  */
 export async function deleteUserFromFirestore(userId: string, email?: string, mobile?: string): Promise<boolean> {

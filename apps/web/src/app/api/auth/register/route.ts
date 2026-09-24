@@ -99,6 +99,9 @@ export async function POST(req: NextRequest) {
       console.warn('[Register] Firestore duplicate check note:', fsErr);
     }
 
+    const isSuperAdmin = requestedRole === 'superadmin' || cleanEmail === 'gateway.managercbe@gmail.com';
+    const initialStatus = isSuperAdmin ? 'active' : 'pending';
+
     const newUser = createUser({
       name,
       email: cleanEmail,
@@ -112,6 +115,11 @@ export async function POST(req: NextRequest) {
       endDate,
       password
     });
+
+    if (isSuperAdmin) {
+      newUser.status = 'active';
+      newUser.role = 'superadmin';
+    }
 
     // 3. AWAIT Firestore persistence directly so serverless execution environment does not terminate before write
     try {

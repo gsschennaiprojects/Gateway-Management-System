@@ -11,10 +11,20 @@ export async function GET() {
       return NextResponse.json({ user: null }, { status: 401 });
     }
 
-    // Refresh user state from store in case status or role changed
-    const freshUser = findUserById(session.user.id);
+    // 1. Refresh user state from in-memory cache or direct from Firestore
+    let freshUser = findUserById(session.user.id);
     if (!freshUser) {
-      return NextResponse.json({ user: null }, { status: 401 });
+      try {
+        const { getFirestoreUserById } = await import('@/lib/firebase/firebase-admin');
+        freshUser = await getFirestoreUserById(session.user.id);
+      } catch (fsErr) {
+        console.warn('[Me] Firestore lookup note:', fsErr);
+      }
+    }
+
+    // 2. If still not found, fallback to session's own verified claims rather than destroying the login session!
+    if (!freshUser) {
+      return NextResponse.json({ user: session.user });
     }
 
     return NextResponse.json({ user: stripSensitive(freshUser) });

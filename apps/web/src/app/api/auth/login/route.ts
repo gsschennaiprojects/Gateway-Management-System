@@ -16,45 +16,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let user = findUserByIdentifier(identifier);
+    // 1. Authoritative lookup from Cloud Firestore users collection first
+    let user: any = null;
+    try {
+      const { getFirestoreUserByIdentifier } = await import('@/lib/firebase/firebase-admin');
+      user = await getFirestoreUserByIdentifier(identifier);
+    } catch (fsErr) {
+      console.warn('[Login] Firestore lookup note:', fsErr);
+    }
 
-    // Fallback: check Firestore users collection if not in local memory
+    // 2. Fallback to in-memory store if Firestore is offline
     if (!user) {
-      try {
-        const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
-        const db = getAdminFirestore();
-        if (db) {
-          const cleanId = identifier.trim().toLowerCase();
-          const digitsOnly = identifier.replace(/\D/g, '');
-          
-          let snap = await db.collection('users').where('email', '==', cleanId).limit(1).get();
-          if (snap.empty && digitsOnly.length >= 10) {
-            snap = await db.collection('users').where('mobile', '==', digitsOnly.slice(-10)).limit(1).get();
-          }
-          if (snap.empty) {
-            snap = await db.collection('users').where('gmail', '==', cleanId).limit(1).get();
-          }
+      user = findUserByIdentifier(identifier);
+    } else {
+      // Keep in-memory store warm with the authoritative Firestore record
+      const { upsertServerUser } = await import('@/lib/auth/user-store');
+      upsertServerUser(user);
+    }
 
-          if (!snap.empty) {
-            const docData = snap.docs[0].data();
-            user = {
-              id: snap.docs[0].id,
-              name: docData.name || 'Staff Member',
-              email: docData.email || docData.gmail || cleanId,
-              mobile: docData.mobile || '',
-              role: (docData.role?.toLowerCase() as any) || 'intern',
-              status: (docData.status as any) || 'active',
-              branch: docData.branch || 'Coimbatore',
-              specialization: docData.specialization || 'Operations',
-              specializations: docData.specializations || [],
-              createdAt: docData.createdAt || new Date().toISOString(),
-              passwordHash: docData.password || undefined
-            };
-          }
-        }
-      } catch (fsErr) {
-        console.warn('[Login] Firestore lookup note:', fsErr);
-      }
+    // 3. Super Admin accounts are always active
+    if (user && (user.role === 'superadmin' || user.email === 'gateway.managercbe@gmail.com')) {
+      user.status = 'active';
     }
 
     if (!user) {

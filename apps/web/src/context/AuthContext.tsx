@@ -120,7 +120,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       setUser(data.user);
-      router.push('/pending');
+      if (data.user.status === 'active') {
+        router.push('/dashboard');
+      } else {
+        router.push('/pending');
+      }
       return { success: true, user: data.user };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error during registration';
