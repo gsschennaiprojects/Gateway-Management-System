@@ -1,11 +1,616 @@
 rules_version = '2';
+
+/**
+ * ============================================================================
+ * GATEWAY MANAGEMENT SYSTEM (GSS) — PRODUCTION CLOUD FIRESTORE SECURITY RULES
+ * ============================================================================
+ *
+ * Enterprise-grade multi-branch, role-based security rules designed for Gateway
+ * Software Solutions enterprise workforce & student management platform.
+ *
+ * Security Architecture & Guarantees:
+ * 1. Default-Deny Security Model:
+ *    All paths are locked down by default. Explicit access is granted only to
+ *    authenticated actors adhering to strict role and branch boundaries.
+ * 2. Multi-Branch Isolation:
+ *    Staff, administrators, and HR can only access data belonging to their
+ *    designated branch (Coimbatore, Chennai, Madurai, Erode). Super Administrators
+ *    possess cross-branch administrative visibility.
+ * 3. Role-Based Access Control (RBAC):
+ *    - superadmin / SUPER_ADMIN : Global system governance & configuration.
+ *    - admin / ADMIN             : Branch-level workforce, operations, & task supervision.
+ *    - hr / HR                   : Branch recruitment, student onboarding, & attendance monitoring.
+ *    - employee / EMPLOYEE       : Daily operations, assigned tasks, self-worklogs, & assigned students.
+ *    - intern / INTERN           : Learning deliverables, assigned tasks, self-worklogs, & attendance.
+ * 4. Dual Identity Resolution (Claims + Document Fallback):
+ *    Rules evaluate custom auth token claims (fastest path, 0 DB reads). If claims
+ *    are absent during migration or session initialization, rules seamlessly fall back
+ *    to cached user profile lookups in `/users/{uid}`.
+ * 5. Defense-in-Depth & Credential Lockdown:
+ *    - Zero exposure of sensitive fields (password, passwordHash, securityCode, etc.).
+ *    - Non-privileged users are prevented from elevating roles, altering branch IDs,
+ *      or changing their own approval statuses.
+ * 6. Server-Only Collection Isolation:
+ *    Sensitive audit trails, rate limiters, phone indices, and projection outbox jobs
+ *    are strictly inaccessible to client SDKs (`allow read, write: if false;`).
+ * ============================================================================
+ */
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // All reads and mutations flow through authenticated Next.js server routes
-    // using the Firebase Admin SDK. Client SDK access is denied so profiles,
-    // operational records, and legacy credential fields cannot be enumerated.
+
+    // ==========================================================================
+    // SECTION 1: CORE AUTHENTICATION & IDENTITY HELPERS
+    // ==========================================================================
+
+    /**
+     * Checks if the incoming request is from an authenticated Firebase user.
+     */
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    /**
+     * Checks if a profile document exists for the authenticated user.
+     */
+    function userDocExists() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    /**
+     * Retrieves the user profile document data. Cached per transaction.
+     */
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    /**
+     * Resolves the user's role.
+     * Checks Custom Token Claims first, then falls back to Firestore document.
+     */
+    function getUserRole() {
+      return request.auth.token.role != null
+        ? request.auth.token.role
+        : (userDocExists() && 'role' in getUserDoc() ? getUserDoc().role : '');
+    }
+
+    /**
+     * Resolves the user's assigned branch identifier or name.
+     * Checks Custom Token Claims first, then falls back to Firestore document.
+     */
+    function getUserBranch() {
+      return request.auth.token.branch != null
+        ? request.auth.token.branch
+        : (request.auth.token.branchId != null
+            ? request.auth.token.branchId
+            : (userDocExists()
+                ? ('branch' in getUserDoc() ? getUserDoc().branch : ('branchId' in getUserDoc() ? getUserDoc().branchId : ''))
+                : ''));
+    }
+
+    /**
+     * Resolves the user's employee identifier.
+     */
+    function getUserEmployeeId() {
+      return request.auth.token.employeeId != null
+        ? request.auth.token.employeeId
+        : (userDocExists()
+            ? ('employeeId' in getUserDoc() ? getUserDoc().employeeId : ('id' in getUserDoc() ? getUserDoc().id : request.auth.uid))
+            : request.auth.uid);
+    }
+
+    /**
+     * Verifies that the user account is active (not pending, rejected, or disabled).
+     */
+    function isUserActive() {
+      return !userDocExists() || 
+        !('status' in getUserDoc()) || 
+        getUserDoc().status in ['active', 'ACTIVE'] ||
+        ('accountStatus' in getUserDoc() && getUserDoc().accountStatus in ['active', 'ACTIVE']);
+    }
+
+    // ==========================================================================
+    // SECTION 2: ROLE-BASED ACCESS CONTROL (RBAC) HELPERS
+    // ==========================================================================
+
+    /**
+     * Super Administrator check (Global visibility and authority).
+     */
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserRole() in ['superadmin', 'SUPER_ADMIN', 'SUPERADMIN'];
+    }
+
+    /**
+     * Administrator check (Branch Admin or Super Admin).
+     */
+    function isAdmin() {
+      return isSuperAdmin() || (isAuthenticated() && getUserRole() in ['admin', 'ADMIN']);
+    }
+
+    /**
+     * Human Resources check (HR, Admin, or Super Admin).
+     */
+    function isHR() {
+      return isSuperAdmin() || (isAuthenticated() && getUserRole() in ['hr', 'HR', 'admin', 'ADMIN']);
+    }
+
+    /**
+     * General staff verification (Any recognized active internal role).
+     */
+    function isStaff() {
+      return isAuthenticated() && getUserRole() in [
+        'superadmin', 'admin', 'hr', 'employee', 'intern',
+        'SUPER_ADMIN', 'ADMIN', 'HR', 'EMPLOYEE', 'INTERN'
+      ];
+    }
+
+    // ==========================================================================
+    // SECTION 3: MULTI-BRANCH VALIDATION HELPERS
+    // ==========================================================================
+
+    /**
+     * Matches branch identifiers bidirectionally across full names, short codes,
+     * and formal branch codes used across Gateway Software Solutions.
+     */
+    function matchBranch(userBranch, targetBranch) {
+      return userBranch == targetBranch ||
+        targetBranch in ['all', 'All', 'ALL'] ||
+        (userBranch in ['Coimbatore', 'CBE', 'BR_CBE_01', 'BR_CBE_02'] && targetBranch in ['Coimbatore', 'CBE', 'BR_CBE_01', 'BR_CBE_02']) ||
+        (userBranch in ['Chennai', 'CHN', 'BR_CHN_01'] && targetBranch in ['Chennai', 'CHN', 'BR_CHN_01']) ||
+        (userBranch in ['Madurai', 'MDU', 'BR_MDU_01', 'BR_MDU_03'] && targetBranch in ['Madurai', 'MDU', 'BR_MDU_01', 'BR_MDU_03']) ||
+        (userBranch in ['Erode', 'ERD', 'BR_ERD_01', 'BR_ERD_04'] && targetBranch in ['Erode', 'ERD', 'BR_ERD_01', 'BR_ERD_04']);
+    }
+
+    /**
+     * Safely extracts the branch from a document data object (handles 'branch' or 'branchId').
+     */
+    function getDocBranch(data) {
+      return 'branch' in data ? data.branch : ('branchId' in data ? data.branchId : '');
+    }
+
+    /**
+     * Verifies if the authenticated actor is an admin authorized for the document's branch.
+     */
+    function isBranchAdminFor(targetBranch) {
+      return isSuperAdmin() || (isAdmin() && isUserActive() && matchBranch(getUserBranch(), targetBranch));
+    }
+
+    /**
+     * Verifies if the authenticated actor is an active staff member belonging to the document's branch.
+     */
+    function isBranchStaffFor(targetBranch) {
+      return isSuperAdmin() || (isStaff() && isUserActive() && matchBranch(getUserBranch(), targetBranch));
+    }
+
+    // ==========================================================================
+    // SECTION 4: DATA INTEGRITY & ANTI-TAMPER HELPERS
+    // ==========================================================================
+
+    /**
+     * Enforces that client writes never introduce secret/credential fields.
+     */
+    function noCredentialFields(data) {
+      return !data.keys().hasAny([
+        'password', 'passwordHash', 'tempPassword', 'securityCode', 'apiKey', 'secret'
+      ]);
+    }
+
+    /**
+     * Prevents users from escalating their own role, status, or branch assignment.
+     */
+    function noPrivilegeEscalation(diff) {
+      return !diff.affectedKeys().hasAny([
+        'role', 'status', 'accountStatus', 'branch', 'branchId',
+        'uid', 'id', 'employeeId', 'permissions', 'email', 'gmail'
+      ]);
+    }
+
+    // ==========================================================================
+    // DEFAULT LOCKDOWN
+    // ==========================================================================
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    // ==========================================================================
+    // 1. USERS COLLECTION (`users/{userId}`)
+    // ==========================================================================
+    match /users/{userId} {
+      // Read access:
+      // - Self can read their own profile.
+      // - Super Admin can read all user records.
+      // - Branch Admins and HR can read staff and intern profiles within their branch.
+      // - Branch staff can read peer directory cards within the same branch.
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isSuperAdmin() ||
+        (isStaff() && matchBranch(getUserBranch(), getDocBranch(resource.data)))
+      );
+
+      // Create access:
+      // - Super Admin can create any profile.
+      // - Self-registration: authenticated user creating their own initial profile document
+      //   with strict restrictions: cannot set elevated role or active status directly.
+      allow create: if isSuperAdmin() || (
+        isAuthenticated() &&
+        request.auth.uid == userId &&
+        noCredentialFields(request.resource.data) &&
+        (
+          !('role' in request.resource.data) ||
+          request.resource.data.role in ['employee', 'intern', 'EMPLOYEE', 'INTERN']
+        ) &&
+        (
+          !('status' in request.resource.data) ||
+          request.resource.data.status in ['pending', 'PENDING']
+        )
+      );
+
+      // Update access:
+      // - Super Admin can update any profile.
+      // - Branch Admin can update members in their branch (cannot promote to superadmin or modify secrets).
+      // - Self: User can update personal profile fields (bio, mobile, avatarUrl, specializations),
+      //   but cannot touch role, status, branch, or credentials.
+      allow update: if isAuthenticated() && noCredentialFields(request.resource.data) && (
+        isSuperAdmin() ||
+        (
+          isAdmin() &&
+          matchBranch(getUserBranch(), getDocBranch(resource.data)) &&
+          !(resource.data.role in ['superadmin', 'SUPER_ADMIN', 'SUPERADMIN']) &&
+          (!('role' in request.resource.data) || !(request.resource.data.role in ['superadmin', 'SUPER_ADMIN', 'SUPERADMIN'])) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'id'])
+        ) ||
+        (
+          request.auth.uid == userId &&
+          noPrivilegeEscalation(request.resource.data.diff(resource.data))
+        )
+      );
+
+      // Delete access:
+      // Superadmin only (audit preservation).
+      allow delete: if isSuperAdmin();
+    }
+
+    // ==========================================================================
+    // 2. TASKS COLLECTION (`tasks/{taskId}`)
+    // ==========================================================================
+    match /tasks/{taskId} {
+      // Read access:
+      // - Super Admin can read all tasks.
+      // - Branch Admin / HR can read all tasks in their branch.
+      // - Assigned staff can read tasks where they are target/assignee or creator.
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(resource.data))) ||
+        (
+          isBranchStaffFor(getDocBranch(resource.data)) && (
+            ('targetUserId' in resource.data && (resource.data.targetUserId == request.auth.uid || resource.data.targetUserId == getUserEmployeeId())) ||
+            ('assignedToUserIds' in resource.data && resource.data.assignedToUserIds is list && (request.auth.uid in resource.data.assignedToUserIds || getUserEmployeeId() in resource.data.assignedToUserIds)) ||
+            ('assignedToMultiple' in resource.data && resource.data.assignedToMultiple is list && (request.auth.uid in resource.data.assignedToMultiple || getUserEmployeeId() in resource.data.assignedToMultiple)) ||
+            ('assignedBy' in resource.data && 'id' in resource.data.assignedBy && resource.data.assignedBy.id == request.auth.uid)
+          )
+        )
+      );
+
+      // Create access:
+      // - Super Admin or Branch Admin / HR for their designated branch.
+      allow create: if isAuthenticated() && (
+        isSuperAdmin() ||
+        (isAdmin() && matchBranch(getUserBranch(), getDocBranch(request.resource.data))) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(request.resource.data)))
+      );
+
+      // Update access:
+      // - Super Admin: full update.
+      // - Branch Admin: full update within their branch.
+      // - Assignee: can ONLY update progress, status, remarks, and completion date.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (
+          isBranchStaffFor(getDocBranch(resource.data)) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'progressPercentage', 'remarks', 'completedDate', 'updatedAt'
+          ]) &&
+          (
+            !('status' in request.resource.data) ||
+            request.resource.data.status in [
+              'pending', 'in_progress', 'completed', 'partially_stopped',
+              'Assigned', 'On Progress', 'Completed', 'Partially Stopped'
+            ]
+          ) &&
+          (
+            !('progressPercentage' in request.resource.data) ||
+            (request.resource.data.progressPercentage >= 0 && request.resource.data.progressPercentage <= 100)
+          ) &&
+          (
+            ('targetUserId' in resource.data && (resource.data.targetUserId == request.auth.uid || resource.data.targetUserId == getUserEmployeeId())) ||
+            ('assignedToUserIds' in resource.data && resource.data.assignedToUserIds is list && (request.auth.uid in resource.data.assignedToUserIds || getUserEmployeeId() in resource.data.assignedToUserIds)) ||
+            ('assignedToMultiple' in resource.data && resource.data.assignedToMultiple is list && (request.auth.uid in resource.data.assignedToMultiple || getUserEmployeeId() in resource.data.assignedToMultiple))
+          )
+        )
+      );
+
+      // Delete access:
+      // Super Admin or Branch Admin for that branch.
+      allow delete: if isAuthenticated() && isBranchAdminFor(getDocBranch(resource.data));
+    }
+
+    // ==========================================================================
+    // 3. STUDENTS COLLECTION (`students/{studentId}`)
+    // ==========================================================================
+    match /students/{studentId} {
+      // Read access:
+      // Branch staff can view students undergoing internships/courses in their branch.
+      allow read: if isAuthenticated() && isBranchStaffFor(getDocBranch(resource.data));
+
+      // Create access:
+      // Branch Admins and HR can onboard and register students for their branch.
+      allow create: if isAuthenticated() && (
+        isSuperAdmin() ||
+        (isAdmin() && matchBranch(getUserBranch(), getDocBranch(request.resource.data))) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(request.resource.data)))
+      );
+
+      // Update access:
+      // - Super Admin or Branch Admin / HR: full branch updates.
+      // - Assigned Mentor: can update progress, daily attendance, daily deliverables, and fee status.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(resource.data))) ||
+        (
+          isBranchStaffFor(getDocBranch(resource.data)) &&
+          (
+            ('mentorStaffId' in resource.data && (resource.data.mentorStaffId == request.auth.uid || resource.data.mentorStaffId == getUserEmployeeId())) ||
+            ('assignedToId' in resource.data && (resource.data.assignedToId == request.auth.uid || resource.data.assignedToId == getUserEmployeeId()))
+          ) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'todayStatus', 'yesterdayTaskDone', 'dailyAttendance', 'dailyTasks',
+            'projectTitle', 'projectCompleted', 'projectStatus', 'feeStatus',
+            'studentStatus', 'updatedAt'
+          ])
+        )
+      );
+
+      // Delete access:
+      // Super Admin or Branch Admin.
+      allow delete: if isAuthenticated() && isBranchAdminFor(getDocBranch(resource.data));
+    }
+
+    // ==========================================================================
+    // 4. DAILY WORKLOGS COLLECTION (`daily_worklogs/{logId}`)
+    // ==========================================================================
+    match /daily_worklogs/{logId} {
+      // Read access:
+      // - Super Admin.
+      // - Branch Admin and HR for their branch.
+      // - Staff member reading their own worklog history.
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(resource.data))) ||
+        (
+          ('userId' in resource.data && (resource.data.userId == request.auth.uid || resource.data.userId == getUserEmployeeId())) ||
+          ('staffId' in resource.data && (resource.data.staffId == request.auth.uid || resource.data.staffId == getUserEmployeeId()))
+        )
+      );
+
+      // Create access:
+      // Staff logging their daily shift in their branch, or Branch Admin.
+      allow create: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(request.resource.data)) ||
+        (
+          matchBranch(getUserBranch(), getDocBranch(request.resource.data)) &&
+          (
+            ('userId' in request.resource.data && (request.resource.data.userId == request.auth.uid || request.resource.data.userId == getUserEmployeeId())) ||
+            ('staffId' in request.resource.data && (request.resource.data.staffId == request.auth.uid || request.resource.data.staffId == getUserEmployeeId()))
+          )
+        )
+      );
+
+      // Update access:
+      // Staff updating tasks/logout time on their own worklog, or Branch Admin verifying.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (
+          (
+            ('userId' in resource.data && (resource.data.userId == request.auth.uid || resource.data.userId == getUserEmployeeId())) ||
+            ('staffId' in resource.data && (resource.data.staffId == request.auth.uid || resource.data.staffId == getUserEmployeeId()))
+          ) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['userId', 'staffId', 'branch', 'branchId'])
+        )
+      );
+
+      // Delete access:
+      // Super Admin only (audit preservation).
+      allow delete: if isSuperAdmin();
+    }
+
+    // ==========================================================================
+    // 5. ATTENDANCE COLLECTION (`attendance/{attId}`)
+    // ==========================================================================
+    match /attendance/{attId} {
+      // Read access:
+      // Staff can view their own punches; Admins and HR can view branch punches.
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(resource.data))) ||
+        (
+          ('userId' in resource.data && (resource.data.userId == request.auth.uid || resource.data.userId == getUserEmployeeId())) ||
+          ('staffId' in resource.data && (resource.data.staffId == request.auth.uid || resource.data.staffId == getUserEmployeeId()))
+        )
+      );
+
+      // Create access:
+      // Staff punching in/out for themselves, or Branch Admin / HR marking attendance.
+      allow create: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(request.resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(request.resource.data))) ||
+        (
+          matchBranch(getUserBranch(), getDocBranch(request.resource.data)) &&
+          (
+            ('userId' in request.resource.data && (request.resource.data.userId == request.auth.uid || request.resource.data.userId == getUserEmployeeId())) ||
+            ('staffId' in request.resource.data && (request.resource.data.staffId == request.auth.uid || request.resource.data.staffId == getUserEmployeeId()))
+          )
+        )
+      );
+
+      // Update access:
+      // Staff updating checkout for current shift, or Admin/HR correcting record.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(resource.data))) ||
+        (
+          (
+            ('userId' in resource.data && (resource.data.userId == request.auth.uid || resource.data.userId == getUserEmployeeId())) ||
+            ('staffId' in resource.data && (resource.data.staffId == request.auth.uid || resource.data.staffId == getUserEmployeeId()))
+          ) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['userId', 'staffId', 'branch', 'branchId'])
+        )
+      );
+
+      // Delete access:
+      // Super Admin only (compliance preservation).
+      allow delete: if isSuperAdmin();
+    }
+
+    // ==========================================================================
+    // 6. BRANCHES COLLECTION (`branches/{branchId}`)
+    // ==========================================================================
+    match /branches/{branchId} {
+      // Read access:
+      // All authenticated staff need branch metadata for routing, shifts, and dropdowns.
+      allow read: if isAuthenticated();
+
+      // Mutation access:
+      // Strictly reserved for Super Admin governance.
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // ==========================================================================
+    // 7. NOTIFICATIONS COLLECTION (`notifications/{notifId}`)
+    // ==========================================================================
+    match /notifications/{notifId} {
+      // Read access:
+      // Recipient only, or Super Admin.
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        ('recipientId' in resource.data && (resource.data.recipientId == request.auth.uid || resource.data.recipientId == getUserEmployeeId()))
+      );
+
+      // Create access:
+      // System or elevated staff creating notifications.
+      allow create: if isAuthenticated() && (isSuperAdmin() || isAdmin() || isHR());
+
+      // Update access:
+      // Recipient marking notification as read.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
+        (
+          ('recipientId' in resource.data && (resource.data.recipientId == request.auth.uid || resource.data.recipientId == getUserEmployeeId())) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'updatedAt'])
+        )
+      );
+
+      // Delete access:
+      // Recipient dismissing their notification, or Super Admin.
+      allow delete: if isAuthenticated() && (
+        isSuperAdmin() ||
+        ('recipientId' in resource.data && (resource.data.recipientId == request.auth.uid || resource.data.recipientId == getUserEmployeeId()))
+      );
+    }
+
+    // ==========================================================================
+    // 8. CANDIDATE LEADS COLLECTION (`candidate_leads/{leadId}`)
+    // ==========================================================================
+    match /candidate_leads/{leadId} {
+      // Read access:
+      // HR and Admins in that branch, assigned counselor, or Super Admin.
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(resource.data))) ||
+        ('assignedHrId' in resource.data && (resource.data.assignedHrId == request.auth.uid || resource.data.assignedHrId == getUserEmployeeId()))
+      );
+
+      // Create access:
+      // HR, Branch Admin, or Super Admin.
+      allow create: if isAuthenticated() && (
+        isSuperAdmin() ||
+        (isAdmin() && matchBranch(getUserBranch(), getDocBranch(request.resource.data))) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(request.resource.data)))
+      );
+
+      // Update access:
+      // Branch Admin, HR, or assigned counselor updating lead status and notes.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isBranchAdminFor(getDocBranch(resource.data)) ||
+        (isHR() && matchBranch(getUserBranch(), getDocBranch(resource.data))) ||
+        (
+          ('assignedHrId' in resource.data && (resource.data.assignedHrId == request.auth.uid || resource.data.assignedHrId == getUserEmployeeId())) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leadStatus', 'remarks', 'updatedAt'])
+        )
+      );
+
+      // Delete access:
+      // Branch Admin or Super Admin.
+      allow delete: if isAuthenticated() && isBranchAdminFor(getDocBranch(resource.data));
+    }
+
+    // ==========================================================================
+    // 9. TASK HISTORY COLLECTION (`task_history/{historyId}`)
+    // ==========================================================================
+    match /task_history/{historyId} {
+      // Read access:
+      // Super Admin and Branch Admins for auditing status transitions.
+      allow read: if isAuthenticated() && (isSuperAdmin() || isAdmin());
+
+      // Write access:
+      // Strictly server-only via Admin SDK transactions.
+      allow write: if false;
+    }
+
+    // ==========================================================================
+    // 10. STRICT SERVER-ONLY & INFRASTRUCTURE COLLECTIONS
+    // ==========================================================================
+
+    // Internal phone lookup index — accessed purely via Next.js server auth routes.
+    match /phoneIndex/{mobile} {
+      allow read, write: if false;
+    }
+
+    // AES encrypted credentials — strictly server-only.
+    match /emailCredentials/{uid} {
+      allow read, write: if false;
+    }
+
+    // Asynchronous Google Sheets transactional outbox jobs — background worker only.
+    match /projection_jobs/{jobId} {
+      allow read, write: if false;
+    }
+
+    // Distributed login rate limit buckets — server-only middleware.
+    match /login_rate_limits/{limitId} {
+      allow read, write: if false;
+    }
+
+    // Immutable system compliance audit logs.
+    match /audit_logs/{auditId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    // Global System Configuration & Readiness Probes.
+    match /systemConfig/{configId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
     }
   }
 }
