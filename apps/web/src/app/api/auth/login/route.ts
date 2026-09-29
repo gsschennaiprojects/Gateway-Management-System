@@ -51,9 +51,7 @@ export async function POST(req: NextRequest) {
 
     // Resolve password hash or stored password
     const storedHash = user.passwordHash || user.password;
-    const isSuperAdminAccount = user.role === 'superadmin' || user.email === 'gateway.managercbe@gmail.com';
-
-    if (typeof password !== 'string' || password.length === 0 || (!storedHash && !isSuperAdminAccount)) {
+    if (typeof password !== 'string' || password.length === 0 || !storedHash) {
       return NextResponse.json(
         { error: 'Invalid password. Please verify your password and try again.' },
         { status: 401 }
@@ -62,13 +60,6 @@ export async function POST(req: NextRequest) {
 
     let passwordCheck = storedHash ? verifyPassword(password, storedHash) : { valid: false, needsUpgrade: false };
     
-    // Authoritative fallback for Super Admin master password
-    if (!passwordCheck.valid && isSuperAdminAccount) {
-      if (password === 'GatewaySS@2013#' || password === 'GatewaySS@2013') {
-        passwordCheck = { valid: true, needsUpgrade: true };
-      }
-    }
-
     if (!passwordCheck.valid) {
       return NextResponse.json(
         { error: 'Invalid password. Please verify your password and try again.' },
@@ -91,7 +82,6 @@ export async function POST(req: NextRequest) {
         status: user.status,
         branch: user.branch,
         passwordHash,
-        password: password,
         createdAt: user.createdAt,
       });
       user = upgradedUser;

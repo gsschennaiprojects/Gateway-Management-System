@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 import { TaskPointInput } from '@/components/worklog/TaskPointInput';
+import { PunchOutConfirmationModal } from '@/components/worklog/PunchOutConfirmationModal';
 import { useDailySession } from '@/lib/worklogs/useDailySession';
 import {
   ClipboardList,
@@ -62,6 +63,10 @@ export default function WorklogPage() {
     elapsedTime,
     punchIn,
     punchOut,
+    isPunchOutModalOpen,
+    requestPunchOut,
+    cancelPunchOut,
+    confirmPunchOut,
     saveSession,
     saving,
     error,
@@ -268,7 +273,7 @@ export default function WorklogPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => punchOut()}
+                    onClick={() => requestPunchOut()}
                     className="px-4 py-2 rounded-full bg-[var(--badge-danger-text,#D93025)] hover:opacity-90 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
                   >
                     <LogOut className="w-3.5 h-3.5" />
@@ -605,6 +610,22 @@ export default function WorklogPage() {
           </div>
         )}
       </div>
+
+
+      {/* Two-Step Confirmation Modal for Daily Session Log Out / Punch Out */}
+      <PunchOutConfirmationModal
+        isOpen={isPunchOutModalOpen}
+        onClose={cancelPunchOut}
+        onConfirm={confirmPunchOut}
+        saving={saving}
+        liveDate={liveDate}
+        loginTime={loginTime}
+        plannedTasks={plannedTasks}
+        completedTasks={completedTasks}
+        incompleteReason={incompleteReason}
+        estimatedHours={workingCalc?.formatted}
+      />
     </div>
   );
 }
+

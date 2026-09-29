@@ -47,6 +47,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
+      data-scroll-behavior="smooth"
       className="h-full"
     >
       <body className="min-h-full font-sans antialiased">

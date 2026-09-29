@@ -36,4 +36,37 @@ describe('session token integrity', () => {
     process.env.SESSION_SECRET = 'a-different-session-secret-of-32-bytes';
     expect(parseSessionToken(token)).toBeNull();
   });
+
+  it('uses a process-local signing secret in development when none is configured', () => {
+    const environment = process.env as Record<string, string | undefined>;
+    const previousSecret = environment.SESSION_SECRET;
+    const previousNodeEnv = environment.NODE_ENV;
+    try {
+      delete environment.SESSION_SECRET;
+      environment.NODE_ENV = 'development';
+      const token = createSessionToken(user);
+      expect(parseSessionToken(token)?.user.id).toBe(user.id);
+    } finally {
+      if (previousSecret === undefined) delete environment.SESSION_SECRET;
+      else environment.SESSION_SECRET = previousSecret;
+      if (previousNodeEnv === undefined) delete environment.NODE_ENV;
+      else environment.NODE_ENV = previousNodeEnv;
+    }
+  });
+
+  it('requires an explicit signing secret in production', () => {
+    const environment = process.env as Record<string, string | undefined>;
+    const previousSecret = environment.SESSION_SECRET;
+    const previousNodeEnv = environment.NODE_ENV;
+    try {
+      delete environment.SESSION_SECRET;
+      environment.NODE_ENV = 'production';
+      expect(() => createSessionToken(user)).toThrow('SESSION_SECRET must be configured');
+    } finally {
+      if (previousSecret === undefined) delete environment.SESSION_SECRET;
+      else environment.SESSION_SECRET = previousSecret;
+      if (previousNodeEnv === undefined) delete environment.NODE_ENV;
+      else environment.NODE_ENV = previousNodeEnv;
+    }
+  });
 });

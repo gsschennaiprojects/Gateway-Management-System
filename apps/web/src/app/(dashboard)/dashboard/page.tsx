@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { formatStudentDate } from '@/types/student';
 import { TaskPointInput } from '@/components/worklog/TaskPointInput';
+import { PunchOutConfirmationModal } from '@/components/worklog/PunchOutConfirmationModal';
 import { useDailySession } from '@/lib/worklogs/useDailySession';
 
 interface Student {
@@ -94,6 +95,11 @@ export default function EmployeeDashboardPage() {
     elapsedTime,
     punchIn,
     punchOut,
+    isPunchOutModalOpen,
+    requestPunchOut,
+    cancelPunchOut,
+    confirmPunchOut,
+    saving,
     incompleteReason,
     setIncompleteReason,
     error,
@@ -350,7 +356,7 @@ export default function EmployeeDashboardPage() {
                 )}
                 <Button
                   variant="danger"
-                  onClick={() => punchOut()}
+                  onClick={() => requestPunchOut()}
                   leftIcon={<LogOut className="w-4 h-4" />}
                 >
                   Log Out (Punch Out at {liveDate.currentTime})
@@ -653,6 +659,21 @@ export default function EmployeeDashboardPage() {
           </table>
         </div>
       </GlassPanel>
+
+      {/* Two-Step Confirmation Modal for Daily Session Log Out / Punch Out */}
+      <PunchOutConfirmationModal
+        isOpen={isPunchOutModalOpen}
+        onClose={cancelPunchOut}
+        onConfirm={confirmPunchOut}
+        saving={saving}
+        liveDate={liveDate}
+        loginTime={loginTime}
+        plannedTasks={plannedTasks}
+        completedTasks={completedTasks}
+        incompleteReason={incompleteReason}
+        estimatedHours={workingCalc?.formatted}
+      />
     </div>
   );
 }
+

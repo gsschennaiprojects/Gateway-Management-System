@@ -2,7 +2,8 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, LoginCredentials, RegisterPayload } from '@/types/auth';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
+import { LogoutConfirmationModal } from '@/components/auth/LogoutConfirmationModal';
 
 interface AuthContextType {
   user: User | null;
@@ -10,6 +11,11 @@ interface AuthContextType {
   login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string; user?: User }>;
   register: (payload: RegisterPayload) => Promise<{ success: boolean; error?: string; user?: User; alreadyExists?: boolean; email?: string }>;
   logout: () => Promise<void>;
+  requestLogout: () => void;
+  cancelLogout: () => void;
+  confirmLogout: () => Promise<void>;
+  isLogoutModalOpen: boolean;
+  isLoggingOut: boolean;
   quickLogin: (identifier: string) => Promise<boolean>;
   refreshSession: () => Promise<void>;
 }
@@ -19,20 +25,25 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const router = useRouter();
-  const pathname = usePathname();
 
   const refreshSession = useCallback(async () => {
     try {
       const res = await fetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        setUser(data.user);
-      } else {
+        if (data.user) {
+          setUser(data.user);
+        } else {
+          setUser(null);
+        }
+      } else if (res.status === 401) {
         setUser(null);
       }
     } catch {
-      setUser(null);
+      // No client-side profile cache is trusted as authentication state.
     } finally {
       setLoading(false);
     }
@@ -120,6 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       setUser(data.user);
+
       if (data.user.status === 'active') {
         router.push('/dashboard');
       } else {
@@ -137,14 +149,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return res.success;
   };
 
-  const logout = async () => {
+  // Step 1: Request Logout (opens confirmation modal)
+  const requestLogout = useCallback(() => {
+    setIsLogoutModalOpen(true);
+  }, []);
+
+  // Cancel Logout (closes confirmation modal, user stays logged in)
+  const cancelLogout = useCallback(() => {
+    setIsLogoutModalOpen(false);
+  }, []);
+
+  // Step 2: Confirmed Logout (executes backend call and terminates session)
+  const confirmLogout = useCallback(async () => {
+    setIsLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.warn('[AuthContext] Backend logout note:', err);
     } finally {
       setUser(null);
+      setIsLoggingOut(false);
+      setIsLogoutModalOpen(false);
       router.push('/login');
     }
-  };
+  }, [router]);
+
+  // Universal logout: triggers Step 1 modal for two-step confirmation
+  const logout = useCallback(async () => {
+    requestLogout();
+  }, [requestLogout]);
+
 
   return (
     <AuthContext.Provider
@@ -154,11 +188,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         register,
         logout,
+        requestLogout,
+        cancelLogout,
+        confirmLogout,
+        isLogoutModalOpen,
+        isLoggingOut,
         quickLogin,
         refreshSession
       }}
     >
       {children}
+      {/* Global Two-Step Confirmation Logout Modal */}
+      <LogoutConfirmationModal />
     </AuthContext.Provider>
   );
 }

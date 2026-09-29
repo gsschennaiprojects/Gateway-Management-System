@@ -96,7 +96,6 @@ export function InspectorGuard() {
     };
 
     // ── 4. DevTools Open Detection Loop ─────────────────────────────────────
-    let devToolsCheckInterval: NodeJS.Timeout;
     const detectDevTools = () => {
       const widthThreshold = window.outerWidth - window.innerWidth > 160;
       const heightThreshold = window.outerHeight - window.innerHeight > 160;
@@ -115,11 +114,11 @@ export function InspectorGuard() {
     suppressConsole();
 
     // Check periodically for DevTools opening
-    devToolsCheckInterval = setInterval(detectDevTools, 2000);
+    const devToolsCheckInterval = setInterval(detectDevTools, 2000);
 
     return () => {
-      document.removeEventListener('contextmenu', handleContextMenu, { capture: true } as any);
-      window.removeEventListener('keydown', handleKeyDown, { capture: true } as any);
+      document.removeEventListener('contextmenu', handleContextMenu, true);
+      window.removeEventListener('keydown', handleKeyDown, true);
       clearInterval(devToolsCheckInterval);
     };
   }, []);

@@ -5,14 +5,22 @@ import { User, AuthSession } from '@/types/auth';
 export const SESSION_COOKIE_NAME = 'gss_session';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
 
+const DEFAULT_DEV_SESSION_SECRET = 'gss-enterprise-system-production-secret-session-key-32b';
+
 function getSigningSecret(): string {
   const secret = process.env.SESSION_SECRET;
-  if (secret && Buffer.byteLength(secret, 'utf8') >= 32) {
-    return secret;
+  if (secret && Buffer.byteLength(secret, 'utf8') >= 32) return secret;
+
+  if (process.env.NODE_ENV !== 'production') {
+    // Return a deterministic 32-byte secret so Next.js worker threads and browser refreshes
+    // always share the exact same signature verification key.
+    return DEFAULT_DEV_SESSION_SECRET;
   }
-  // High-entropy production fallback to guarantee non-breaking operation across all environments
-  return 'gss-enterprise-gateway-management-system-super-secure-session-secret-key-32b';
+
+  throw new Error('SESSION_SECRET must be configured with at least 32 bytes.');
 }
+
+
 
 export function createSessionToken(user: User): string {
   const payload = {

@@ -48,6 +48,7 @@ export function useDailySession() {
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isPunchOutModalOpen, setIsPunchOutModalOpen] = useState<boolean>(false);
 
   // Live timer for elapsed time
   const [elapsedTime, setElapsedTime] = useState<{ hours: number; minutes: number; formatted: string; shortFormatted: string } | null>(null);
@@ -360,7 +361,43 @@ export function useDailySession() {
     [loginTime, plannedTasks, completedTasks, incompleteReason, updateLocalStorage, broadcastSync]
   );
 
-  // ── Action: Clear / Reset Punch Session ──────────────────────────────────
+  // ── Step 1 of 2: Request Punch Out (Validates and opens confirmation modal) ─
+  const requestPunchOut = useCallback((): boolean => {
+    const validCompleted = completedTasks.map((t) => t.trim()).filter(Boolean);
+    if (validCompleted.length === 0) {
+      setError('At least one completed task must be entered before logging out.');
+      return false;
+    }
+
+    const validPlanned = plannedTasks.map((t) => t.trim()).filter(Boolean);
+    if (validCompleted.length < validPlanned.length) {
+      if (!incompleteReason.trim()) {
+        setError(
+          `Completed tasks (${validCompleted.length}) are fewer than planned tasks (${validPlanned.length}). Please provide the reason for incomplete tasks before logging out.`
+        );
+        return false;
+      }
+    }
+
+    setError(null);
+    setIsPunchOutModalOpen(true);
+    return true;
+  }, [completedTasks, plannedTasks, incompleteReason]);
+
+  // Cancel Punch Out (closes modal)
+  const cancelPunchOut = useCallback(() => {
+    setIsPunchOutModalOpen(false);
+  }, []);
+
+  // Step 2 of 2: Confirmed Punch Out (closes modal and saves to database)
+  const confirmPunchOut = useCallback(
+    async (customTime?: string): Promise<boolean> => {
+      setIsPunchOutModalOpen(false);
+      return await punchOut(customTime);
+    },
+    [punchOut]
+  );
+
   const clearPunch = useCallback(async () => {
     setLoginTime('');
     setLogoutTime('');
@@ -521,6 +558,10 @@ export function useDailySession() {
     elapsedTime,
     punchIn,
     punchOut,
+    isPunchOutModalOpen,
+    requestPunchOut,
+    cancelPunchOut,
+    confirmPunchOut,
     saveSession,
     refreshSession: loadSession,
     loading,
