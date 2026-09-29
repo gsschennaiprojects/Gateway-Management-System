@@ -39,7 +39,7 @@ describe('Student Domain Calculations & Tenure Logic', () => {
 
   describe('calculateTenureProgress', () => {
     it('computes exact days and percentage relative to reference date', () => {
-      const res = calculateTenureProgress('2026-07-01', '2026-09-30');
+      const res = calculateTenureProgress('2026-07-01', '2026-09-30', new Date('2026-08-01T12:00:00Z'));
       expect(res.totalDays).toBeGreaterThan(80);
       expect(res.elapsedDays).toBeGreaterThan(0);
       expect(res.remainingDays).toBeGreaterThan(0);

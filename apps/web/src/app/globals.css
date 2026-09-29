@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --font-serif: var(--font-fraunces), Georgia, Cambria, serif;
-  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: var(--font-mono), "JetBrains Mono", Consolas, monospace;
+  --font-serif: Georgia, Cambria, "Times New Roman", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -644,4 +644,3 @@ nextjs-portal,
   box-shadow: 0 2px 5px rgba(70, 45, 20, 0.18), 0 1px 2px rgba(70, 45, 20, 0.1) !important;
   color: #8E7E6C !important;
 }
-

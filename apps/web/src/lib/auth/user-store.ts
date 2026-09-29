@@ -1,8 +1,9 @@
 import { StoredUser, INITIAL_USERS } from './mock-users';
 import { RegisterPayload, User, Branch } from '@/types/auth';
+import { hashPassword } from './password';
 
 // In-memory runtime store for server-side route handlers
-let serverUsers: StoredUser[] = [...INITIAL_USERS];
+const serverUsers: StoredUser[] = [...INITIAL_USERS];
 
 export function getAllUsers(): StoredUser[] {
   return serverUsers;
@@ -72,10 +73,9 @@ export function createUser(payload: RegisterPayload & { id?: string }): StoredUs
     ? payload.additionalSpecializations
     : specsArray.slice(1);
 
-  const isSuperAdmin = payload.requestedRole === 'superadmin' || payload.email.trim().toLowerCase() === 'gateway.managercbe@gmail.com';
-  const initialStatus = isSuperAdmin ? 'active' : 'pending';
-  const assignedRole = isSuperAdmin ? 'superadmin' : (payload.requestedRole || 'intern');
-  const userId = payload.id || (isSuperAdmin ? 'GSS_SA_001' : generateProfessionalUserId(assignedRole, serverUsers));
+  const assignedRole = payload.requestedRole === 'intern' ? 'intern' : 'employee';
+  const initialStatus = 'pending';
+  const userId = payload.id || generateProfessionalUserId(assignedRole, serverUsers);
 
   const newUser: StoredUser = {
     id: userId,
@@ -93,7 +93,7 @@ export function createUser(payload: RegisterPayload & { id?: string }): StoredUs
     startDate: payload.startDate,
     endDate: payload.endDate,
     createdAt: new Date().toISOString(),
-    passwordHash: payload.password
+    passwordHash: hashPassword(payload.password)
   };
 
   serverUsers.push(newUser);
@@ -144,6 +144,8 @@ export function deleteUser(userId: string): boolean {
 }
 
 export function stripSensitive(user: StoredUser): User {
-  const { passwordHash: _p, ...safeUser } = user;
-  return safeUser;
+  const safeUser = { ...user } as Record<string, unknown>;
+  delete safeUser.passwordHash;
+  delete safeUser.password;
+  return safeUser as unknown as User;
 }

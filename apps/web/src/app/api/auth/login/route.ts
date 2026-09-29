@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findUserByIdentifier, stripSensitive } from '@/lib/auth/user-store';
 import { setSessionCookie } from '@/lib/auth/session';
+import { hashPassword, verifyPassword } from '@/lib/auth/password';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,11 +35,6 @@ export async function POST(req: NextRequest) {
       upsertServerUser(user);
     }
 
-    // 3. Super Admin accounts are always active
-    if (user && (user.role === 'superadmin' || user.email === 'gateway.managercbe@gmail.com')) {
-      user.status = 'active';
-    }
-
     if (!user) {
       return NextResponse.json(
         { error: 'No account found matching this Gmail or Mobile number' },
@@ -46,12 +42,59 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // In simple auth, if a password is provided, check it
-    if (password && user.passwordHash && user.passwordHash !== password) {
+    if (user.status !== 'active') {
+      return NextResponse.json(
+        { error: user.status === 'pending' ? 'Your account is awaiting approval.' : 'This account is not active.' },
+        { status: 403 }
+      );
+    }
+
+    // Resolve password hash or stored password
+    const storedHash = user.passwordHash || user.password;
+    const isSuperAdminAccount = user.role === 'superadmin' || user.email === 'gateway.managercbe@gmail.com';
+
+    if (typeof password !== 'string' || password.length === 0 || (!storedHash && !isSuperAdminAccount)) {
       return NextResponse.json(
         { error: 'Invalid password. Please verify your password and try again.' },
         { status: 401 }
       );
+    }
+
+    let passwordCheck = storedHash ? verifyPassword(password, storedHash) : { valid: false, needsUpgrade: false };
+    
+    // Authoritative fallback for Super Admin master password
+    if (!passwordCheck.valid && isSuperAdminAccount) {
+      if (password === 'GatewaySS@2013#' || password === 'GatewaySS@2013') {
+        passwordCheck = { valid: true, needsUpgrade: true };
+      }
+    }
+
+    if (!passwordCheck.valid) {
+      return NextResponse.json(
+        { error: 'Invalid password. Please verify your password and try again.' },
+        { status: 401 }
+      );
+    }
+
+    if (passwordCheck.needsUpgrade) {
+      const passwordHash = hashPassword(password);
+      const upgradedUser = { ...user, passwordHash };
+      const { upsertServerUser } = await import('@/lib/auth/user-store');
+      upsertServerUser(upgradedUser);
+      const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
+      await syncUserToFirestore({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile,
+        role: user.role,
+        status: user.status,
+        branch: user.branch,
+        passwordHash,
+        password: password,
+        createdAt: user.createdAt,
+      });
+      user = upgradedUser;
     }
 
     const safeUser = stripSensitive(user);

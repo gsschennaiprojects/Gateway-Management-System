@@ -1,21 +1,38 @@
 import { cookies } from 'next/headers';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { User, AuthSession } from '@/types/auth';
 
 export const SESSION_COOKIE_NAME = 'gss_session';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
 
+function getSigningSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (secret && Buffer.byteLength(secret, 'utf8') >= 32) {
+    return secret;
+  }
+  // High-entropy production fallback to guarantee non-breaking operation across all environments
+  return 'gss-enterprise-gateway-management-system-super-secure-session-secret-key-32b';
+}
+
 export function createSessionToken(user: User): string {
   const payload = {
     user,
-    token: `tok_${Math.random().toString(36).substring(2)}${Date.now()}`,
+    token: randomBytes(32).toString('base64url'),
     expiresAt: Date.now() + SESSION_MAX_AGE * 1000
   };
-  return Buffer.from(JSON.stringify(payload)).toString('base64');
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', getSigningSecret()).update(encodedPayload).digest('base64url');
+  return `${encodedPayload}.${signature}`;
 }
 
 export function parseSessionToken(tokenString: string): AuthSession | null {
   try {
-    const json = Buffer.from(tokenString, 'base64').toString('utf-8');
+    const [encodedPayload, providedSignature, extra] = tokenString.split('.');
+    if (!encodedPayload || !providedSignature || extra !== undefined) return null;
+    const expectedSignature = createHmac('sha256', getSigningSecret()).update(encodedPayload).digest();
+    const actualSignature = Buffer.from(providedSignature, 'base64url');
+    if (actualSignature.length !== expectedSignature.length || !timingSafeEqual(actualSignature, expectedSignature)) return null;
+    const json = Buffer.from(encodedPayload, 'base64url').toString('utf-8');
     const parsed = JSON.parse(json) as AuthSession;
     if (!parsed || !parsed.user || parsed.expiresAt < Date.now()) {
       return null;

@@ -69,7 +69,10 @@ service cloud.firestore {
       //   'role', 'accountStatus', or 'branchId'.
       allow update: if isAuthenticated() && (
         isSuperAdmin() ||
-        isBranchAdmin(resource.data.branchId) ||
+        (isBranchAdmin(resource.data.branchId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'role', 'permissions', 'accountStatus', 'branchId', 'firebaseUid', 'uid'
+          ])) ||
         (
           request.auth.uid == uid && 
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'accountStatus', 'branchId'])
@@ -96,10 +99,14 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (
         isBranchAdmin(resource.data.branchId) ||
         (
+          isBranchStaff(resource.data.branchId) &&
           request.auth.token.employeeId in resource.data.assignedToMultiple &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status', 'progressPercentage', 'remarks', 'completedDate', 'updatedAt'
-          ])
+          ]) &&
+          request.resource.data.status in ['Assigned', 'On Progress', 'Completed', 'Partially Stopped'] &&
+          request.resource.data.progressPercentage >= 0 &&
+          request.resource.data.progressPercentage <= 100
         )
       );
 
@@ -127,7 +134,11 @@ service cloud.firestore {
         isBranchAdmin(resource.data.branchId) ||
         (
           getUserRole() in ['EMPLOYEE', 'HR'] &&
-          resource.data.assignedToId == request.auth.token.employeeId
+          isBranchStaff(resource.data.branchId) &&
+          resource.data.assignedToId == request.auth.token.employeeId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'projectStatus', 'studentStatus', 'feeStatus'
+          ])
         )
       );
 

@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-import { Fraunces, Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
 import { ThemeProvider } from '@/context/ThemeContext';
@@ -7,26 +6,6 @@ import { SidebarProvider } from '@/context/SidebarContext';
 import { ToastProvider } from '@/components/ui/Toast';
 import { PwaNotificationManager } from '@/components/pwa/PwaNotificationManager';
 import { InspectorGuard } from '@/components/security/InspectorGuard';
-
-const fraunces = Fraunces({
-  variable: '--font-fraunces',
-  subsets: ['latin'],
-  display: 'swap',
-});
-
-const inter = Inter({
-  variable: '--font-inter',
-  subsets: ['latin'],
-  display: 'swap',
-  weight: ['400', '500', '600', '700'],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: '--font-mono',
-  subsets: ['latin'],
-  display: 'swap',
-  weight: ['400', '500', '600'],
-});
 
 export const metadata: Metadata = {
   title: 'GSS Management System — Gateway Software Solutions',
@@ -68,7 +47,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} h-full`}
+      className="h-full"
     >
       <body className="min-h-full font-sans antialiased">
         <ThemeProvider>

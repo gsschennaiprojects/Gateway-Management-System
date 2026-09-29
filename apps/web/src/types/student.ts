@@ -59,7 +59,7 @@ export function formatStudentDate(dateStr?: string): string {
   }
 }
 
-export function calculateTenureProgress(startDateStr: string, endDateStr: string): {
+export function calculateTenureProgress(startDateStr: string, endDateStr: string, referenceDate = new Date()): {
   totalDays: number;
   elapsedDays: number;
   remainingDays: number;
@@ -67,17 +67,17 @@ export function calculateTenureProgress(startDateStr: string, endDateStr: string
 } {
   const start = new Date(startDateStr);
   const end = new Date(endDateStr);
-  const now = new Date(); // Dynamic live system date
-
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
     return { totalDays: 90, elapsedDays: 45, remainingDays: 45, percentage: 50 };
   }
 
-  const totalTime = end.getTime() - start.getTime();
-  const totalDays = Math.ceil(totalTime / (1000 * 60 * 60 * 24));
+  const millisecondsPerDay = 1000 * 60 * 60 * 24;
+  const startDay = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+  const todayDay = Date.UTC(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+  const totalDays = Math.floor((endDay - startDay) / millisecondsPerDay) + 1;
 
-  const elapsedTime = Math.max(0, now.getTime() - start.getTime());
-  const elapsedDays = Math.min(totalDays, Math.ceil(elapsedTime / (1000 * 60 * 60 * 24)));
+  const elapsedDays = Math.min(totalDays, Math.max(0, Math.floor((todayDay - startDay) / millisecondsPerDay) + 1));
   const remainingDays = Math.max(0, totalDays - elapsedDays);
   const percentage = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
 
@@ -89,4 +89,3 @@ export const SEP_WORKING_DAYS = [
   1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 28, 29, 30
 ];
 export const INITIAL_STUDENTS_DATA: Student[] = [];
-

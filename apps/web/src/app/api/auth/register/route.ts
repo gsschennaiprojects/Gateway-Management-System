@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, stripSensitive, findUserByIdentifier } from '@/lib/auth/user-store';
-import { setSessionCookie } from '@/lib/auth/session';
-import { RegisterPayload, BRANCHES, SPECIALIZATIONS } from '@/types/auth';
+import { createUser, deleteUser, stripSensitive, findUserByIdentifier } from '@/lib/auth/user-store';
+import { RegisterPayload, BRANCHES } from '@/types/auth';
 import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +23,12 @@ export async function POST(req: NextRequest) {
       password
     } = body as RegisterPayload;
     requestEmail = email?.trim()?.toLowerCase() || '';
+
+    // Public registration may request only entry-level roles. Elevated roles
+    // are assigned through the authenticated Super Admin workflow.
+    if (!['employee', 'intern'].includes(requestedRole)) {
+      return NextResponse.json({ error: 'Select a supported staff role.' }, { status: 400 });
+    }
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'Full name is required' }, { status: 400 });
@@ -99,19 +104,12 @@ export async function POST(req: NextRequest) {
       console.warn('[Register] Firestore duplicate check note:', fsErr);
     }
 
-    const isSuperAdmin = requestedRole === 'superadmin' || cleanEmail === 'gateway.managercbe@gmail.com';
-    const initialStatus = isSuperAdmin ? 'active' : 'pending';
-
     let professionalId: string | undefined;
-    if (isSuperAdmin) {
-      professionalId = 'GSS_SA_001';
-    } else {
-      try {
-        const { getNextProfessionalUserId } = await import('@/lib/firebase/firebase-admin');
-        professionalId = await getNextProfessionalUserId(requestedRole || 'intern');
-      } catch {
-        // Fallback handled by createUser's generator
-      }
+    try {
+      const { getNextProfessionalUserId } = await import('@/lib/firebase/firebase-admin');
+      professionalId = await getNextProfessionalUserId(requestedRole);
+    } catch {
+      // Fallback handled by createUser's generator
     }
 
     const newUser = createUser({
@@ -129,15 +127,12 @@ export async function POST(req: NextRequest) {
       password
     });
 
-    if (isSuperAdmin) {
-      newUser.status = 'active';
-      newUser.role = 'superadmin';
-    }
 
     // 3. AWAIT Firestore persistence directly so serverless execution environment does not terminate before write
+    let userPersisted = false;
     try {
       const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
-      await syncUserToFirestore({
+      userPersisted = await syncUserToFirestore({
         id: newUser.id,
         name: newUser.name,
         email: newUser.email,
@@ -150,11 +145,19 @@ export async function POST(req: NextRequest) {
         startMonthYear: newUser.startMonthYear,
         startDate: newUser.startDate,
         endDate: newUser.endDate,
-        password: password,
+        passwordHash: newUser.passwordHash,
         createdAt: newUser.createdAt
       });
     } catch (fsErr) {
       console.warn('[Register] Firestore sync note:', fsErr);
+    }
+
+    if (!userPersisted) {
+      deleteUser(newUser.id);
+      return NextResponse.json(
+        { error: 'We could not save your registration. Please try again shortly.' },
+        { status: 503 }
+      );
     }
 
     // 4. Google Sheets directory sync (with timeout protection)
@@ -185,9 +188,6 @@ export async function POST(req: NextRequest) {
     }
 
     const safeUser = stripSensitive(newUser);
-    // Set session cookie with the new user in 'pending' status
-    await setSessionCookie(safeUser);
-
     return NextResponse.json({
       success: true,
       message: 'Your account has been registered and is pending approval.',

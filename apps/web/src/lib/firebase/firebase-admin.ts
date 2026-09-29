@@ -6,7 +6,7 @@
  */
 
 import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/app';
-import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -57,20 +57,8 @@ function loadServiceAccountKey(): Record<string, any> | null {
     }
   }
 
-  // 3. Fallback credentials for serverless deployment
-  return {
-    type: "service_account",
-    project_id: "gss-management-system-eef75",
-    private_key_id: "0b53db1b954a508487ffaf68c4ff1d2d65acf08e",
-    private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDiczqfMLkCqC1K\nK0srHjqNRGkaslXXzVDoYSqnQCpZYnmk7iwFFEevBRf1og+6Em27/wDEBRs3uUTx\n1if08riQnj2s5u6l7HsQ57FRlVkmsuP4OrPuaCQHQI8OswZZA7IfIIAo1TEEB6MJ\n2GE0AW8UImrWkgdP0ocQPtoTNrZoe8N47/D393WUgHCGOUwJNzbCrbMeZkRmyCI4\nab7+aq1lTOK857TzfqsN3y5ZBvxpMsYfAN30xL73dk8qt1SV6HLg41UlN0Z16tqn\nl6q7VzZ/TTwxtiVTqtXg+PRswaDgmgGFeU20LdmKc0VFNlsYmdbG0SByERplhnKd\nfxTV1P9TAgMBAAECggEAbgdmJv5SDt/vbZfepLtB4O0qEp4vRrWMx/SaeHyddyP5\njjFpsygY8ooLi77sXFFi/1MWqKgAgxFi1gzkCkk7c41n01C8CWP/ogWp60WhdUO7\nsBu53K++PcXZHN/QyESa8jPlAbIg6F/bkMeR52aA9ewJNGvs4JSfKr4XUPmnJNl/\nr0e/3Crmjhsy/xdvB/Qm2FMgtXMEAcu0/aQOvNyaZFvxDJXQZCRal9YBgKgEQCEL\nX5Ny39eHI/14SQ5AAY8QcZASXfJniW/lhw24LwVrb+rC5NPDaiO3kEgdzn3nupqi\na/Jy6mw6uQ+kAyQPTLd6PLmbdrS5P08QT6f0WlnanQKBgQD8qe/kXyu49JnqEQxT\noXWKjx9eQnVujEITMqyKNoj9kK4ny+P24GYbxYkLI0norgQheoRmIwVG30bN6phz\njJ8/FaMIdWJ0hWIbxtwki6nrgwQ0VZ0itALiUVkbNrG1yLB2Mkk1HELGDlWI7/D1\nDDX/uqhnrch6zPzjsGtCSrEGHQKBgQDlcK72qYkfCbEcdgQujx2VckA1ipbPuqqI\n51mev2fI3YNK9BxhEGaafvJe8+qg66cj8rr0O8RnyFWLcrlMOdzqrepjUT8fxP1f\nTYbP/kdMZc/QvdIDWhxjIXTH+Vj5To13ONP3cseLkNat+Py4O2v67vIIY779nYsX\nxQLoWxJgLwKBgAXAiKmWURSA3RArGzC8OETTRU+MC8hcgRSWzr7Gxw+ev5hAWAxC\nx5BSSvBp+UDG1Wk9tM3udixK4P3HHXlj9iwlffSvV3J3pugi+tgKJfAqp2nZmR41\nIuusFm88K4eL7hiCxI/k+NAxe1kGvWGWyZPs1/CkUDAbgpZcadS0hpsxAoGBAJo+\naMEWNEKTZ2e0xxbty3uedSAJbV11JhQnQ45/KqxUjmEjPrjaJ8ARO6st2zwXcCOw\nmJJ8Y4tJmIjItV1TQPrbtEjUY9VdvuAE5G6LiS8I+u5fzgHG4HKcGUAelvvzHRNb\nNtSRayieVFRcoLjR6cOmQzv0on8pHEr8fPnrz6ytAoGASjVbT2Kw344EOjoq4Nl8\nnDK83q0pP1HzImvo/5BjClS54iV7SmIuJzIQjCmfz/RdChVXk9COiH2ODN1CrC6C\n7KOZXfEuaII3Yggt9nJx8ypPptkArkP3/GUBeHyR8PdCfuPLSFFTndpxuAGaXDO2\n6oIzMopkzlOfLP8PQSXO/+Y=\n-----END PRIVATE KEY-----\n",
-    client_email: "firebase-adminsdk-fbsvc@gss-management-system-eef75.iam.gserviceaccount.com",
-    client_id: "103905619853685923852",
-    auth_uri: "https://accounts.google.com/o/oauth2/auth",
-    token_uri: "https://oauth2.googleapis.com/token",
-    auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-    client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40gss-management-system-eef75.iam.gserviceaccount.com",
-    universe_domain: "googleapis.com"
-  };
+  // Do not ship service account credentials in source. Configure FIREBASE_SERVICE_ACCOUNT_KEY or a local ignored key file.
+  return null;
 }
 
 export function getAdminApp(): App | null {
@@ -90,11 +78,15 @@ export function getAdminApp(): App | null {
   if (sa.project_id !== 'gss-management-system-eef75') {
     throw new Error(`[FirebaseAdmin] Unauthorized database connection rejected. Configured: ${sa.project_id}, Expected: gss-management-system-eef75`);
   }
+  if (!sa.private_key || !sa.client_email) {
+    throw new Error('[FirebaseAdmin] Service account credentials are incomplete.');
+  }
 
   try {
     const formattedSa = {
-      ...sa,
-      private_key: typeof sa.private_key === 'string' ? sa.private_key.replace(/\\n/g, '\n') : sa.private_key
+      projectId: sa.project_id,
+      clientEmail: sa.client_email,
+      privateKey: sa.private_key.replace(/\\n/g, '\n')
     };
     adminApp = initializeApp({
       credential: cert(formattedSa),
@@ -142,6 +134,7 @@ export async function syncUserToFirestore(userData: {
   startMonthYear?: string;
   startDate?: string;
   endDate?: string;
+  passwordHash?: string;
   password?: string;
   createdAt?: string;
 }): Promise<boolean> {
@@ -164,6 +157,7 @@ export async function syncUserToFirestore(userData: {
       startMonthYear: userData.startMonthYear || '',
       startDate: userData.startDate || '',
       endDate: userData.endDate || '',
+      ...(userData.passwordHash ? { passwordHash: userData.passwordHash } : {}),
       ...(userData.password ? { password: userData.password } : {}),
       updatedAt: new Date().toISOString(),
       createdAt: userData.createdAt || new Date().toISOString()
@@ -351,7 +345,7 @@ export async function getFirestoreUsers(): Promise<any[]> {
         startDate: d.startDate || '',
         endDate: d.endDate || '',
         createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.password || undefined
+        passwordHash: d.passwordHash || d.password || undefined
       };
     });
   } catch (err: any) {
@@ -387,7 +381,7 @@ export async function getFirestoreUserById(id: string): Promise<any | null> {
         startDate: d.startDate || '',
         endDate: d.endDate || '',
         createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.password || undefined
+        passwordHash: d.passwordHash || d.password || undefined
       };
     }
     return null;
@@ -466,7 +460,7 @@ export async function getFirestoreUserByIdentifier(identifier: string): Promise<
         startDate: d.startDate || '',
         endDate: d.endDate || '',
         createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.password || undefined
+        passwordHash: d.passwordHash || d.password || undefined
       };
     }
 
@@ -498,7 +492,7 @@ export async function getFirestoreUserByIdentifier(identifier: string): Promise<
         startDate: d.startDate || '',
         endDate: d.endDate || '',
         createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.password || undefined
+        passwordHash: d.passwordHash || d.password || undefined
       };
     }
     return null;

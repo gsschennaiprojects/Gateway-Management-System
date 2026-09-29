@@ -38,12 +38,6 @@ export default function UserManagementPage() {
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [branchFilter, setBranchFilter] = useState<string>('all');
 
-  // Password visibility state for Super Admin
-  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
-  const togglePassword = (userId: string) => {
-    setRevealedPasswords((prev) => ({ ...prev, [userId]: !prev[userId] }));
-  };
-
   // Double confirmation & Edit modal states
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [modalAction, setModalAction] = useState<'role_change' | 'delete' | 'edit_staff' | null>(null);
@@ -118,7 +112,7 @@ export default function UserManagementPage() {
       role: user.role,
       status: user.status,
       specialization: user.specialization || '',
-      password: user.password || '',
+      password: '',
     });
     setShowEditPassword(false);
     setActionError(null);
@@ -473,7 +467,6 @@ export default function UserManagementPage() {
                 <th className="py-3 px-4">Role</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4">Contact</th>
-                {isSuperAdmin && <th className="py-3 px-4">Password</th>}
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -548,29 +541,6 @@ export default function UserManagementPage() {
                       <div className="text-[var(--text-primary)]">{u.email}</div>
                       <div className="text-[var(--text-muted)] text-[11px]">{u.mobile}</div>
                     </td>
-
-                    {/* Password — Super Admin Exclusive Visibility */}
-                    {isSuperAdmin && (
-                      <td className="py-3.5 px-4 font-mono text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <span className="bg-[var(--bg-card-subtle)] px-2.5 py-1 rounded-lg border border-[var(--border-card)] text-[var(--brand-primary)] font-medium text-[11px] select-all">
-                            {revealedPasswords[u.id] ? (u.password || '••••••••') : '••••••••'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => togglePassword(u.id)}
-                            className="p-1.5 rounded-lg hover:bg-[var(--bg-card-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
-                            title={revealedPasswords[u.id] ? 'Hide password' : 'View staff password'}
-                          >
-                            {revealedPasswords[u.id] ? (
-                              <EyeOff className="w-3.5 h-3.5 text-amber-500" />
-                            ) : (
-                              <Eye className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      </td>
-                    )}
 
                     {/* Actions — ONLY Super Admin can edit any data of staff */}
                     <td className="py-3.5 px-4 text-right">
@@ -761,7 +731,7 @@ export default function UserManagementPage() {
                   <Key className="w-4 h-4 text-[var(--text-muted)] absolute right-3 top-3 pointer-events-none" />
                 </div>
                 <p className="text-[10px] text-[var(--text-muted)] mt-1">
-                  Super Admin can inspect or overwrite this staff member's password directly.
+                  Set a new password here; existing passwords are never displayed.
                 </p>
               </div>
 

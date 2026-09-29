@@ -49,16 +49,12 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const branchParam = searchParams.get('branch');
 
-  // Super Admin can view all branches or filter by branch via query param, and view passwords
+  // Super Admin can view all branches or filter by branch via query param.
   if (session.user.role === 'superadmin') {
     const filtered = (branchParam && branchParam !== 'All' && branchParam !== 'all')
       ? allUsers.filter(u => u.branch === branchParam)
       : allUsers;
-    const usersWithPassword = filtered.map(u => ({
-      ...stripSensitive(u),
-      password: u.passwordHash || u.password || 'GatewaySS@2013#'
-    }));
-    return NextResponse.json({ users: usersWithPassword });
+    return NextResponse.json({ users: filtered.map(stripSensitive) });
   }
 
   // Admin and HR have strictly scoped access to their OWN branch (NO passwords)
@@ -141,7 +137,8 @@ export async function PATCH(req: NextRequest) {
       if (newStatus && typeof newStatus === 'string') target.status = newStatus as any;
       if (specialization !== undefined) target.specialization = specialization;
       if (newPassword && typeof newPassword === 'string' && newPassword.length >= 6) {
-        target.passwordHash = newPassword;
+        const { hashPassword } = await import('@/lib/auth/password');
+        target.passwordHash = hashPassword(newPassword);
       }
 
       const { upsertServerUser } = await import('@/lib/auth/user-store');
@@ -162,7 +159,7 @@ export async function PATCH(req: NextRequest) {
           startMonthYear: target.startMonthYear,
           startDate: target.startDate,
           endDate: target.endDate,
-          password: target.passwordHash,
+          passwordHash: target.passwordHash,
           createdAt: target.createdAt
         });
       } catch (fsErr) {
@@ -198,10 +195,7 @@ export async function PATCH(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        user: {
-          ...stripSensitive(target),
-          password: target.passwordHash
-        }
+        user: stripSensitive(target)
       });
     }
 
@@ -232,7 +226,7 @@ export async function PATCH(req: NextRequest) {
           startMonthYear: updated.startMonthYear,
           startDate: updated.startDate,
           endDate: updated.endDate,
-          password: updated.passwordHash || (target as any).password || (target as any).passwordHash,
+          passwordHash: updated.passwordHash || (target as any).password || (target as any).passwordHash,
           createdAt: updated.createdAt
         });
       } catch (fsErr) {
@@ -317,7 +311,7 @@ export async function PATCH(req: NextRequest) {
           startMonthYear: updated.startMonthYear,
           startDate: updated.startDate,
           endDate: updated.endDate,
-          password: updated.passwordHash || (target as any).password || (target as any).passwordHash,
+          passwordHash: updated.passwordHash || (target as any).password || (target as any).passwordHash,
           createdAt: updated.createdAt
         });
       } catch (fsErr) {
