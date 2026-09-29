@@ -21,7 +21,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     try {
       const saved = localStorage.getItem('gss_sidebar_collapsed');
       if (saved !== null) {
-        setIsCollapsedState(saved === 'true');
+        queueMicrotask(() => setIsCollapsedState(saved === 'true'));
       }
     } catch {
       // ignore

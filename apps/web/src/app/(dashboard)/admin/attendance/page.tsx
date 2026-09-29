@@ -1,26 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { GlassPanel } from '@/components/ui/GlassPanel';
-import { StatusChip } from '@/components/ui/StatusChip';
 import { Button } from '@/components/ui/Button';
 import {
   CalendarCheck,
   ChevronLeft,
   ChevronRight,
   Save,
-  Download,
   CheckCircle2,
-  AlertCircle,
   FileSpreadsheet,
   FileText,
   Loader2,
   Printer,
-  Calendar,
-  Sparkles,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
 import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
+import type { User } from '@/types/auth';
 
 interface StaffAttendanceRecord {
   id: string;
@@ -42,6 +37,7 @@ export default function AttendanceMasterGridPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
   const [downloadingFormat, setDownloadingFormat] = useState<'excel' | 'docx' | null>(null);
 
   // Is viewing the current live month?
@@ -107,22 +103,28 @@ export default function AttendanceMasterGridPage() {
   // Fetch staff users and actual live attendance records
   const loadAttendanceData = useCallback(async () => {
     setLoading(true);
+    setDataError(null);
     try {
       // 1. Fetch active users
       const usersRes = await fetch('/api/auth/users');
+      if (!usersRes.ok) throw new Error('Staff directory could not be loaded.');
       const usersData = await usersRes.json();
-      const activeUsers = (usersData.users || []).filter((u: any) => u.status === 'active');
+      const activeUsers = ((usersData.users || []) as User[]).filter((u) => u.status === 'active');
 
       // 2. Fetch existing staff attendance records from sheets
-      let sheetAttMap: Record<string, Record<number, 'present' | 'absent' | 'holiday'>> = {};
-      let userPunchInfo: Record<string, { punchIn?: string; punchOut?: string }> = {};
+      const sheetAttMap: Record<string, Record<number, 'present' | 'absent' | 'holiday'>> = {};
+      const userPunchInfo: Record<string, { punchIn?: string; punchOut?: string }> = {};
 
       try {
         const attRes = await fetch('/api/sheets?type=staff_attendance');
-        if (attRes.ok) {
+        if (!attRes.ok) {
+          const attError = await attRes.json().catch(() => ({}));
+          throw new Error(attError.error || 'Attendance storage is not available.');
+        }
+        {
           const attJson = await attRes.json();
           if (Array.isArray(attJson.data)) {
-            attJson.data.forEach((row: any) => {
+            attJson.data.forEach((row: { staffId?: string; date?: string; status?: string; punchIn?: string; punchOut?: string; checkIn?: string; checkOut?: string }) => {
               // row: { staffId, date, status, punchIn, punchOut }
               if (row.staffId && row.date) {
                 const dateParts = String(row.date).split('-');
@@ -155,11 +157,11 @@ export default function AttendanceMasterGridPage() {
           }
         }
       } catch (attErr) {
-        console.warn('[AttendanceMaster] Attendance fetch note:', attErr);
+        throw attErr;
       }
 
       // 3. Build staff attendance records
-      const initialRecords: StaffAttendanceRecord[] = activeUsers.map((u: any) => {
+      const initialRecords: StaffAttendanceRecord[] = activeUsers.map((u) => {
         const staffAtt = sheetAttMap[u.id] || {};
         const punches = userPunchInfo[u.id] || {};
 
@@ -176,13 +178,14 @@ export default function AttendanceMasterGridPage() {
       setRecords(initialRecords);
     } catch (err) {
       console.error('[AttendanceMaster] Error loading grid data:', err);
+      setDataError(err instanceof Error ? err.message : 'Attendance data could not be loaded.');
     } finally {
       setLoading(false);
     }
   }, [selectedYear, selectedMonth, todayDay]);
 
   useEffect(() => {
-    loadAttendanceData();
+    void Promise.resolve().then(loadAttendanceData);
   }, [loadAttendanceData]);
 
   // Cycle status on cell click (Present -> Absent -> Holiday -> Present)
@@ -190,8 +193,9 @@ export default function AttendanceMasterGridPage() {
     setRecords((prev) =>
       prev.map((rec) => {
         if (rec.id !== recordId) return rec;
-        const current = rec.attendance[day] || (todayDay && day <= todayDay ? 'present' : 'present');
+        const current = rec.attendance[day];
         const next: Record<string, 'present' | 'absent' | 'holiday'> = {
+          unrecorded: 'present',
           present: 'absent',
           absent: 'holiday',
           holiday: 'present',
@@ -200,7 +204,7 @@ export default function AttendanceMasterGridPage() {
           ...rec,
           attendance: {
             ...rec.attendance,
-            [day]: next[current],
+            [day]: next[current || 'unrecorded'],
           },
         };
       })
@@ -212,7 +216,7 @@ export default function AttendanceMasterGridPage() {
     setSaving(true);
     try {
       // Persist to sheets/attendance API
-      await fetch('/api/sheets', {
+      const response = await fetch('/api/sheets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -225,10 +229,16 @@ export default function AttendanceMasterGridPage() {
             attendance: r.attendance,
           })),
         }),
-      }).catch((e) => console.warn('[AttendanceMaster] Save note:', e));
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || 'Attendance changes could not be saved.');
+      }
 
       setSavedNotice(true);
       setTimeout(() => setSavedNotice(false), 3000);
+    } catch (err) {
+      setDataError(err instanceof Error ? err.message : 'Attendance changes could not be saved.');
     } finally {
       setSaving(false);
     }
@@ -248,7 +258,7 @@ export default function AttendanceMasterGridPage() {
 
       const rows = records.map((r) => {
         const daysPresent = workingDays.filter((d) => {
-          const st = r.attendance[d.day] || (todayDay && d.day <= todayDay ? 'present' : '-');
+                  const st = r.attendance[d.day] || '-';
           return st === 'present';
         }).length;
 
@@ -258,7 +268,7 @@ export default function AttendanceMasterGridPage() {
           r.name,
           r.role,
           ...workingDays.map((d) => {
-            const st = r.attendance[d.day] || (todayDay && d.day <= todayDay ? 'present' : '-');
+            const st = r.attendance[d.day] || '-';
             return st === 'present' ? 'P' : st === 'absent' ? 'A' : st === 'holiday' ? 'H' : '-';
           }),
           daysPresent,
@@ -299,7 +309,7 @@ export default function AttendanceMasterGridPage() {
               headers: ['Staff Member', 'Role', 'Working Days', 'Days Present', 'Attendance %', 'Status'],
               rows: records.map((r) => {
                 const daysPresent = workingDays.filter((d) => {
-                  const st = r.attendance[d.day] || (todayDay && d.day <= todayDay ? 'present' : '-');
+          const st = r.attendance[d.day] || '-';
                   return st === 'present';
                 }).length;
                 const rate = Math.round((daysPresent / workingDays.length) * 100);
@@ -399,7 +409,7 @@ export default function AttendanceMasterGridPage() {
             variant="primary"
             size="sm"
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !!dataError}
             leftIcon={saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
           >
             {saving ? 'Saving...' : 'Save Changes'}
@@ -407,6 +417,7 @@ export default function AttendanceMasterGridPage() {
         </div>
       </div>
 
+      {dataError && <div role="alert" className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{dataError}</div>}
       {savedNotice && (
         <div className="p-3 px-4 rounded-xl bg-[var(--badge-success-bg,#E6F4EA)] border border-[var(--badge-success-border,#CEEAD6)] text-[var(--badge-success-text,#137333)] text-xs flex items-center gap-2 transition-all shadow-xs">
           <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
@@ -553,9 +564,7 @@ export default function AttendanceMasterGridPage() {
 
                     {workingDays.map((w) => {
                       const isToday = isCurrentLiveMonth && w.day === todayDay;
-                      const status =
-                        rec.attendance[w.day] ||
-                        (todayDay && w.day <= todayDay ? 'present' : undefined);
+                      const status = rec.attendance[w.day];
 
                       const statusStyles = {
                         present:

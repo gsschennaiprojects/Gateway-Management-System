@@ -1,83 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 import {
-  getNotificationsForUser,
-  markNotificationAsRead,
-  markAllNotificationsAsRead
-} from '@/lib/tasks/task-store';
+  getFirestoreNotifications,
+  markFirestoreNotificationAsRead,
+  markAllFirestoreNotificationsAsRead,
+} from '@/lib/firebase/firebase-admin';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await getSession();
-  if (!session || !session.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  // 1. Authoritative Firestore Fetch
-  let fsNotifications: any[] = [];
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
-    const { getFirestoreNotifications } = await import('@/lib/firebase/firebase-admin');
-    fsNotifications = await getFirestoreNotifications(session.user.id);
-  } catch (err) {
-    console.warn('[Notifications/GET] Firestore fetch note:', err);
+    const notifications = await getFirestoreNotifications(session.user.id);
+    return NextResponse.json({ notifications, unreadCount: notifications.filter(item => !item.isRead).length });
+  } catch {
+    return NextResponse.json({ error: 'Notifications are temporarily unavailable.' }, { status: 503 });
   }
-
-  // 2. In-memory notifications fallback / merge
-  const inMem = getNotificationsForUser(session.user.id);
-
-  // 3. Deduplicate by notification ID
-  const map = new Map<string, any>();
-  for (const n of inMem) {
-    map.set(n.id, n);
-  }
-  for (const fn of fsNotifications) {
-    map.set(fn.id, fn);
-  }
-
-  const notifications = Array.from(map.values()).sort(
-    (a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')
-  );
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
-
-  return NextResponse.json({ notifications, unreadCount });
 }
 
-export async function PATCH(req: NextRequest) {
+export async function PATCH(request: NextRequest) {
   const session = await getSession();
-  if (!session || !session.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (hasOversizedBody(request, 8192)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   try {
-    const body = await req.json();
-    const { notificationId, action } = body;
-
-    if (action === 'mark_all_read') {
-      markAllNotificationsAsRead(session.user.id);
-      try {
-        const { markAllFirestoreNotificationsAsRead } = await import('@/lib/firebase/firebase-admin');
-        await markAllFirestoreNotificationsAsRead(session.user.id);
-      } catch (fsErr) {
-        console.warn('[Notifications/PATCH] Firestore mark all read note:', fsErr);
-      }
-      return NextResponse.json({ success: true });
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+    const input = body as { notificationId?: unknown; action?: unknown };
+    if (input.action === 'mark_all_read') {
+      const success = await markAllFirestoreNotificationsAsRead(session.user.id);
+      return success
+        ? NextResponse.json({ success: true })
+        : NextResponse.json({ error: 'Could not update notifications.' }, { status: 503 });
     }
-
-    if (notificationId) {
-      const success = markNotificationAsRead(notificationId);
-      try {
-        const { markFirestoreNotificationAsRead } = await import('@/lib/firebase/firebase-admin');
-        await markFirestoreNotificationAsRead(notificationId);
-      } catch (fsErr) {
-        console.warn('[Notifications/PATCH] Firestore mark read note:', fsErr);
-      }
-      return NextResponse.json({ success });
+    if (typeof input.notificationId !== 'string' || input.notificationId.length < 1 || input.notificationId.length > 150) {
+      return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
     }
-
-    return NextResponse.json({ error: 'Invalid request parameters' }, { status: 400 });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Operation failed';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const success = await markFirestoreNotificationAsRead(input.notificationId, session.user.id);
+    if (!success) return NextResponse.json({ error: 'Notification was not found or could not be updated.' }, { status: 404 });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: 'Could not update notifications.' }, { status: 503 });
   }
 }

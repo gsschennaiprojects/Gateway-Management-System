@@ -3,6 +3,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import type { User } from '@/types/auth';
+import type { AssignedTask } from '@/types/task';
 import {
   Search,
   X,
@@ -14,13 +16,11 @@ import {
   FileSpreadsheet,
   Settings,
   GraduationCap,
-  Sparkles,
   Clock,
   PlusCircle,
   FileText,
   UserCheck,
   ShieldAlert,
-  ArrowRight,
   Command,
   CornerDownLeft,
   Building2
@@ -147,17 +147,15 @@ export function GoogleHeaderSearchBar() {
       setTimeout(() => {
         inputRef.current?.focus();
       }, 50);
-      setSelectedIndex(0);
+      queueMicrotask(() => setSelectedIndex(0));
     } else {
-      setQuery('');
+      queueMicrotask(() => setQuery(''));
     }
   }, [isOpen]);
 
   // Fetch live staff & tasks when query has 2+ characters
   useEffect(() => {
     if (query.trim().length < 2) {
-      setLiveStaff([]);
-      setLiveTasks([]);
       return;
     }
 
@@ -167,7 +165,7 @@ export function GoogleHeaderSearchBar() {
         const resUsers = await fetch('/api/auth/users');
         if (resUsers.ok) {
           const data = await resUsers.json();
-          const usersList = (data.users || data || []) as any[];
+          const usersList = (data.users || data || []) as User[];
           const matches = usersList
             .filter((u) => {
               const q = query.toLowerCase();
@@ -195,7 +193,7 @@ export function GoogleHeaderSearchBar() {
         const resTasks = await fetch('/api/tasks');
         if (resTasks.ok) {
           const data = await resTasks.json();
-          const tasksList = (data.tasks || data || []) as any[];
+          const tasksList = (data.tasks || data || []) as AssignedTask[];
           const matches = tasksList
             .filter((t) => {
               const q = query.toLowerCase();

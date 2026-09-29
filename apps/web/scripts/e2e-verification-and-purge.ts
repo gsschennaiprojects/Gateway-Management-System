@@ -96,7 +96,7 @@ async function runE2EVerification() {
   });
 
   // Create the 4 allocated subsheets for the staff member on their branch spreadsheet
-  const subsheetResult = await createStaffSubsheets(TEST_SPREADSHEET_ID, TEST_STAFF_ID, TEST_STAFF_NAME, 'intern');
+  const subsheetResult = await createStaffSubsheets(TEST_SPREADSHEET_ID, TEST_STAFF_ID);
   console.log('   - Subsheets creation response:', subsheetResult.createdTabs.join(', '));
 
   // Verify subsheets exist on Google Sheets via API
@@ -125,10 +125,10 @@ async function runE2EVerification() {
     id: TEST_TASK_ID,
     title: 'Synthetic Verification Task',
     description: 'Verify dual persistence pipeline from web to firebase and sheets',
-    assignedBy: { id: 'ADMIN_01', name: 'System Admin' },
+    assignedBy: { id: 'ADMIN_01', name: 'System Admin', role: 'admin' },
     targetType: 'individual',
     targetUserId: TEST_STAFF_ID,
-    priority: 'High',
+    priority: 'high',
     dueDate: '2026-09-25',
     status: 'Assigned',
     createdAt: new Date().toISOString()
@@ -247,7 +247,8 @@ async function runE2EVerification() {
     admissionDate: '2026-09-23',
     feeStatus: 'Paid',
     projectStatus: 'Ongoing',
-    studentStatus: 'Active'
+    studentStatus: 'Active',
+    actor: { id: TEST_STAFF_ID, name: TEST_STAFF_NAME, role: 'employee' }
   });
 
   // Google Sheets Master 06_Student_Directory
@@ -267,6 +268,7 @@ async function runE2EVerification() {
     endDate: '2026-12-23',
     feeStatus: 'Paid',
     projectStatus: 'Ongoing',
+    projectTitle: 'E2E Full Stack Project',
     studentStatus: 'Active'
   });
 
@@ -285,6 +287,7 @@ async function runE2EVerification() {
     endDate: '2026-12-23',
     feeStatus: 'Paid',
     projectStatus: 'Ongoing',
+    projectTitle: 'E2E Full Stack Project',
     studentStatus: 'Active',
     moduleName: 'Module 1',
     topicCovered: 'Intro',

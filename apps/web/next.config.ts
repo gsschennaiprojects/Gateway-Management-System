@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 import path from "path";
 
+// GSS Management System configuration - updated 2026-09-29
+
 const securityHeaders = [
   {
     key: "X-DNS-Prefetch-Control",

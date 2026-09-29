@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import { Camera } from 'lucide-react';
 
 interface AccountAvatarProps {
@@ -50,9 +51,12 @@ export function AccountAvatar({
         {/* Inner circle */}
         <div className="w-full h-full rounded-full bg-[#E8F0FE] flex items-center justify-center overflow-hidden">
           {avatarUrl ? (
-            <img
+            <Image
               src={avatarUrl}
               alt={name}
+              width={112}
+              height={112}
+              unoptimized
               className="w-full h-full object-cover"
             />
           ) : (

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Shield, ShieldCheck, ShieldAlert, AlertTriangle, ChevronRight } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, AlertTriangle, ChevronRight } from 'lucide-react';
 
 type SecurityStatus = 'safe' | 'warning' | 'critical';
 

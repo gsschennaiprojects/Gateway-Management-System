@@ -25,9 +25,6 @@ import {
   FileSpreadsheet,
   Download,
   Printer,
-  ListTodo,
-  ShieldCheck,
-  Sparkles,
   FileText,
   Loader2
 } from 'lucide-react';
@@ -222,7 +219,7 @@ export default function EmployeeDirectoryPage() {
           ['Tasks Completed', summary?.totalCompletedTasks || 13, `of ${summary?.totalPlannedTasks || 14} planned`],
           ['Task Completion Rate', `${summary?.completionRate || 93}%`, 'Above corporate target'],
           ['Assigned Cohort Trainees', summary?.assignedStudentsCount || 4, 'Active Supervised Students'],
-          ...workLogs.map((log: any) => [
+          ...workLogs.map((log) => [
             log.date,
             Array.isArray(log.completedTasks) && log.completedTasks.length > 0
               ? log.completedTasks.join('; ')
@@ -286,7 +283,7 @@ export default function EmployeeDirectoryPage() {
               rows: (workLogs.length > 0 ? workLogs.slice(0, 8) : [
                 { date: '2026-09-22', loginTime: '09:00 AM', logoutTime: '06:00 PM', hoursLogged: 9.0, completedTasks: ['Completed trainee code reviews & milestone sign-offs'] },
                 { date: '2026-09-21', loginTime: '09:05 AM', logoutTime: '06:15 PM', hoursLogged: 9.1, completedTasks: ['Database optimization and attendance API validation'] },
-              ]).map((l: any) => [
+              ]).map((l) => [
                 l.date,
                 `${l.loginTime || '09:00 AM'} – ${l.logoutTime || '06:00 PM'}`,
                 l.hoursLogged ? `${l.hoursLogged} hrs` : '8.5 hrs',

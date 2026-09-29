@@ -52,7 +52,7 @@ const Audit = {
       const sheet = this.initAuditSheet(ss);
 
       const timestamp = Utils.formatDateTime(Utils.getNowIST());
-      const branchId = params.branchId || GSS_CONFIG.BRANCHES.BRANCH_01.ID;
+      const branchId = params.branchId || getCurrentBranchConfig().ID;
       const oldValStr = typeof params.oldValue === 'object' ? JSON.stringify(params.oldValue) : String(params.oldValue || '');
       const newValStr = typeof params.newValue === 'object' ? JSON.stringify(params.newValue) : String(params.newValue || '');
 

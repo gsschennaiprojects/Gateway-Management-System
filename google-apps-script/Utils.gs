@@ -12,9 +12,7 @@ const Utils = {
    * @returns {Date}
    */
   getNowIST() {
-    const d = new Date();
-    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-    return new Date(utc + (3600000 * 5.5));
+    return new Date();
   },
 
   /**
@@ -24,7 +22,7 @@ const Utils = {
    */
   formatDate(date = this.getNowIST()) {
     if (!date) return '';
-    return Utilities.formatDate(date, GSS_CONFIG.DEFAULT_TIMEZONE, GSS_CONFIG.DATE_FORMAT);
+    return Utilities.formatDate(date, getSystemTimezone(), GSS_CONFIG.DATE_FORMAT);
   },
 
   /**
@@ -34,7 +32,7 @@ const Utils = {
    */
   getDayName(date = this.getNowIST()) {
     if (!date) return '';
-    return Utilities.formatDate(date, GSS_CONFIG.DEFAULT_TIMEZONE, 'EEEE');
+    return Utilities.formatDate(date, getSystemTimezone(), 'EEEE');
   },
 
   /**
@@ -44,7 +42,7 @@ const Utils = {
    */
   formatTime(date = this.getNowIST()) {
     if (!date) return '';
-    return Utilities.formatDate(date, GSS_CONFIG.DEFAULT_TIMEZONE, GSS_CONFIG.TIME_FORMAT);
+    return Utilities.formatDate(date, getSystemTimezone(), GSS_CONFIG.TIME_FORMAT);
   },
 
   /**
@@ -54,7 +52,7 @@ const Utils = {
    */
   formatDateTime(date = this.getNowIST()) {
     if (!date) return '';
-    return Utilities.formatDate(date, GSS_CONFIG.DEFAULT_TIMEZONE, GSS_CONFIG.DATETIME_FORMAT);
+    return Utilities.formatDate(date, getSystemTimezone(), GSS_CONFIG.DATETIME_FORMAT);
   },
 
   /**

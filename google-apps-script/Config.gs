@@ -15,41 +15,8 @@ const GSS_CONFIG = {
   TIME_FORMAT: 'hh:mm a',
   DATETIME_FORMAT: 'dd-MM-yyyy hh:mm:ss a',
 
-  // Exactly 4 Operational Branches
-  BRANCHES: {
-    BRANCH_01: {
-      ID: 'BR_CHN_01',
-      CODE: 'CHN',
-      NAME: 'Gateway Chennai Branch',
-      LOCATION: 'Chennai, Tamil Nadu',
-      SPREADSHEET_ID: '1dfKmBvtc15H8JC-tybDMiBOfD0nVScDG1kR6Hpd-bxY',
-      SPREADSHEET_URL: 'https://docs.google.com/spreadsheets/d/1dfKmBvtc15H8JC-tybDMiBOfD0nVScDG1kR6Hpd-bxY/edit'
-    },
-    BRANCH_02: {
-      ID: 'BR_CBE_02',
-      CODE: 'CBE',
-      NAME: 'Gateway Coimbatore Branch',
-      LOCATION: 'Coimbatore, Tamil Nadu',
-      SPREADSHEET_ID: '1pu0IxgbFYwSVXycWXVepXp76476SH1j7a-VxfY_cOnA',
-      SPREADSHEET_URL: 'https://docs.google.com/spreadsheets/d/1pu0IxgbFYwSVXycWXVepXp76476SH1j7a-VxfY_cOnA/edit'
-    },
-    BRANCH_03: {
-      ID: 'BR_MDU_03',
-      CODE: 'MDU',
-      NAME: 'Gateway Madurai Branch',
-      LOCATION: 'Madurai, Tamil Nadu',
-      SPREADSHEET_ID: '1j8JjIXk-9MyvkDTImXr5nZqsihRH5dvIDNluukS0LZ8',
-      SPREADSHEET_URL: 'https://docs.google.com/spreadsheets/d/1j8JjIXk-9MyvkDTImXr5nZqsihRH5dvIDNluukS0LZ8/edit'
-    },
-    BRANCH_04: {
-      ID: 'BR_ERD_04',
-      CODE: 'ERD',
-      NAME: 'Gateway Erode Branch',
-      LOCATION: 'Erode, Tamil Nadu',
-      SPREADSHEET_ID: '1PqPiWkXdelII7IaS5Ua-LJ1vsswYEQVG9YHynMoPegY',
-      SPREADSHEET_URL: 'https://docs.google.com/spreadsheets/d/1PqPiWkXdelII7IaS5Ua-LJ1vsswYEQVG9YHynMoPegY/edit'
-    }
-  },
+  // Runtime branch routing comes from per-spreadsheet Script Properties.
+  BRANCHES: {},
 
   // Common Branch Sheet Names (Strict Prefix & Format)
   SHEETS: {
@@ -121,21 +88,7 @@ const GSS_CONFIG = {
     COMPLETED: 'Completed'
   },
 
-  // Google Cloud & Firebase / Firestore Integration Parameters
-  GOOGLE_CLOUD: {
-    PROJECT_ID: 'management-system-509313',
-    SERVICE_ACCOUNT_EMAIL: 'gss-508@management-system-509313.iam.gserviceaccount.com',
-    OAUTH_CLIENT_ID: '446096297797-1kbqt8i7hffgvkq5k5fntsvlc56mjjbg.apps.googleusercontent.com'
-  },
-  FIREBASE: {
-    PROJECT_ID: 'gss-management-system-eef75',
-    DATABASE_URL: 'https://gss-management-system-eef75.firebaseio.com',
-    FIRESTORE_REST_BASE: 'https://firestore.googleapis.com/v1/projects/gss-management-system-eef75/databases/(default)/documents',
-    API_KEY: 'AIzaSyBdu8_3m0H2a7llugxPQk1FtjjVSosmN6w',
-    AUTH_DOMAIN: 'gss-management-system-eef75.firebaseapp.com',
-    APP_ID: '1:528394878333:web:a9a5da85cefbe639b9a014',
-    MEASUREMENT_ID: 'G-NNL9WX2Q24'
-  },
+  // No Firebase or Google credentials belong in Apps Script source.
 
   // Working Hours Parameters
   WORKING_HOURS: {
@@ -161,3 +114,44 @@ const GSS_CONFIG = {
     BORDER_COLOR: '#DADCE0'
   }
 };
+
+/** Read and validate the branch identity attached to this spreadsheet. */
+function getCurrentBranchConfig() {
+  const props = PropertiesService.getScriptProperties();
+  const config = {
+    ID: props.getProperty('GSS_BRANCH_ID'),
+    CODE: props.getProperty('GSS_BRANCH_CODE'),
+    NAME: props.getProperty('GSS_BRANCH_NAME'),
+    LOCATION: props.getProperty('GSS_BRANCH_LOCATION') || '',
+    SPREADSHEET_ID: props.getProperty('GSS_SPREADSHEET_ID'),
+    TIMEZONE: props.getProperty('GSS_TIMEZONE') || GSS_CONFIG.DEFAULT_TIMEZONE,
+  };
+  const activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (!config.ID || !config.CODE || !config.NAME || !config.SPREADSHEET_ID || !activeSpreadsheet || activeSpreadsheet.getId() !== config.SPREADSHEET_ID) {
+    throw new Error('This spreadsheet is not configured for a registered GSS branch.');
+  }
+  if (!/^[A-Z0-9_-]{2,40}$/.test(config.ID) || !/^[A-Z0-9]{2,8}$/.test(config.CODE)) {
+    throw new Error('Branch Script Properties are invalid.');
+  }
+  return config;
+}
+
+function getSystemTimezone() {
+  return PropertiesService.getScriptProperties().getProperty('GSS_TIMEZONE') || GSS_CONFIG.DEFAULT_TIMEZONE;
+}
+
+/** Run manually after opening the intended branch spreadsheet; never guesses a branch. */
+function configureCurrentBranch(branchId, branchCode, branchName, location, timeZone) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (!spreadsheet) throw new Error('Open a branch spreadsheet before configuration.');
+  if (!branchId || !/^[A-Z0-9_-]{2,40}$/.test(branchId) || !branchCode || !/^[A-Z0-9]{2,8}$/.test(branchCode) || !branchName) {
+    throw new Error('Provide an approved branch ID, branch code, and branch name.');
+  }
+  const zone = timeZone || GSS_CONFIG.DEFAULT_TIMEZONE;
+  try { Utilities.formatDate(new Date(), zone, 'yyyy-MM-dd'); } catch (_) { throw new Error('Invalid IANA timezone.'); }
+  PropertiesService.getScriptProperties().setProperties({
+    GSS_BRANCH_ID: branchId, GSS_BRANCH_CODE: branchCode, GSS_BRANCH_NAME: branchName,
+    GSS_BRANCH_LOCATION: location || '', GSS_SPREADSHEET_ID: spreadsheet.getId(), GSS_TIMEZONE: zone,
+  }, true);
+  return { branchId: branchId, branchCode: branchCode, spreadsheetId: spreadsheet.getId() };
+}

@@ -34,6 +34,8 @@ export interface ExcelExportOptions {
   columnWidths?: number[];
 }
 
+type ExcelCell = string | number | boolean | Date | null | undefined;
+
 /**
  * Downloads a professionally formatted Excel spreadsheet (.xlsx)
  * with title banner, metadata block, and auto-spaced columns.
@@ -50,7 +52,7 @@ export function exportToExcel(options: ExcelExportOptions): void {
     columnWidths,
   } = options;
 
-  const aoa: any[][] = [];
+  const aoa: ExcelCell[][] = [];
 
   // 1. Optional Title & Subtitle
   if (title) {
@@ -153,7 +155,7 @@ export async function exportToDocx(options: DocxExportOptions): Promise<void> {
     sections,
   } = options;
 
-  const docChildren: any[] = [];
+  const docChildren: Array<Paragraph | Table> = [];
 
   // Top Super Header
   docChildren.push(

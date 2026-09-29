@@ -9,14 +9,14 @@ describe('Document Export Utilities (Excel & Word)', () => {
 
   beforeAll(() => {
     // Setup Node global mocks for browser DOM APIs
-    (global as any).document = {
+    (globalThis as unknown as Record<string, unknown>).document = {
       createElement: jest.fn(() => mockAnchor),
       body: {
         appendChild: jest.fn(),
         removeChild: jest.fn(),
       },
     };
-    (global as any).URL = {
+    (globalThis as unknown as Record<string, unknown>).URL = {
       createObjectURL: jest.fn(() => 'blob:mock-url'),
       revokeObjectURL: jest.fn(),
     };

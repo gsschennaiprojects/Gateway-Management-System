@@ -32,7 +32,7 @@ export function InspectorGuard() {
 
     // ── 2. Block DevTools Keyboard Shortcuts ────────────────────────────────
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = (e.key || '').toUpperCase();
+      const key = typeof e.key === 'string' ? e.key.toUpperCase() : '';
       const isCtrlOrMeta = e.ctrlKey || e.metaKey;
       const isShift = e.shiftKey;
       const isAlt = e.altKey;

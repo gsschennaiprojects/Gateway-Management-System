@@ -10,7 +10,6 @@ import {
   Fingerprint,
   Smartphone,
   Monitor,
-  Shield,
   Clock,
   MapPin,
   LogIn,
@@ -19,7 +18,6 @@ import {
   Phone,
   AlertTriangle,
   Laptop,
-  Globe,
 } from 'lucide-react';
 
 interface DeviceEntry {

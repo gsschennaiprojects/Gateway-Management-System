@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { useAuth } from '@/context/AuthContext';
-import { User, UserRole, Branch, BRANCHES } from '@/types/auth';
+import { User, UserRole, UserStatus, Branch, BRANCHES } from '@/types/auth';
 import { canDeleteUser } from '@/lib/rbac/permissions';
 import {
   ShieldAlert,
@@ -18,8 +18,6 @@ import {
   Filter,
   RefreshCw,
   MapPin,
-  Cpu,
-  Lock,
   Printer,
   FileSpreadsheet,
   FileText,
@@ -53,13 +51,13 @@ export default function UserManagementPage() {
     mobile: '',
     branch: 'Coimbatore' as Branch,
     role: 'employee' as UserRole,
-    status: 'active' as any,
+    status: 'active' as UserStatus,
     specialization: '',
     password: '',
   });
   const [showEditPassword, setShowEditPassword] = useState(false);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
       const url =
@@ -77,11 +75,11 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUser, branchFilter]);
 
   useEffect(() => {
-    fetchUsers();
-  }, [currentUser, branchFilter]);
+    void Promise.resolve().then(fetchUsers);
+  }, [fetchUsers]);
 
   const handleStatusChange = async (userId: string, newStatus: 'active' | 'rejected') => {
     try {
@@ -688,7 +686,7 @@ export default function UserManagementPage() {
                   <label className="block font-medium text-[var(--text-secondary)] mb-1">Status</label>
                   <select
                     value={editFormData.status}
-                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+                    onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as UserStatus })}
                     className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
                   >
                     <option value="active">Active</option>

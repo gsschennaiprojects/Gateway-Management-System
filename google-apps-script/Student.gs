@@ -73,7 +73,7 @@ const Student = {
     const row = [
       studentId,
       data.Student_Name || '',
-      data.Branch_ID || GSS_CONFIG.BRANCHES.BRANCH_01.ID,
+      data.Branch_ID || getCurrentBranchConfig().ID,
       data.College || '',
       data.Department || '',
       data.Year || 'Final Year',

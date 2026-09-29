@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { LogOut, X, AlertTriangle, CheckCircle2, Clock, ListChecks, FileText } from 'lucide-react';
+import { LogOut, X, CheckCircle2, Clock, ListChecks, FileText } from 'lucide-react';
 import { LiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
 
 interface PunchOutConfirmationModalProps {

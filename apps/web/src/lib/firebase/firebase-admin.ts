@@ -6,59 +6,154 @@
  */
 
 import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/app';
-import { FieldValue, getFirestore, type Firestore } from 'firebase-admin/firestore';
-import { getAuth, type Auth } from 'firebase-admin/auth';
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getFirestore, type Firestore, type Query, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { getAuth, type Auth } from 'firebase-admin/auth';
+import type { Branch, User, UserRole, UserStatus } from '@/types/auth';
+import type { AssignedTask, TaskGroupTarget, TaskStatus } from '@/types/task';
+import type { TaskNotification } from '@/types/task';
+import type { WorkLogEntry } from '@/types/worklog';
 
 let adminApp: App | null = null;
 let adminDb: Firestore | null = null;
 let adminAuth: Auth | null = null;
 
-function loadServiceAccountKey(): Record<string, any> | null {
-  // 1. Check environment variable (e.g. on Vercel deployment)
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-    try {
-      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-      if (parsed.project_id === 'gss-management-system-eef75' && parsed.private_key) {
-        return parsed;
-      }
-      console.warn(`[FirebaseAdmin] Ignoring FIREBASE_SERVICE_ACCOUNT_KEY: project_id '${parsed.project_id}' is not authorized. ONLY 'gss-management-system-eef75' is allowed.`);
-    } catch (e) {
-      console.warn('[FirebaseAdmin] Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY JSON:', e);
-    }
+interface FirebaseServiceAccount {
+  project_id?: unknown;
+  private_key?: unknown;
+  client_email?: unknown;
+}
+
+export interface UserAuthRecord extends User {
+  passwordHash?: string;
+  password?: string;
+}
+
+interface FirestoreStudentRecord {
+  id: string;
+  studentId: string;
+  studentName: string;
+  branch: string;
+  college: string;
+  department: string;
+  year: string;
+  email: string;
+  mobile: string;
+  course: string;
+  domain: string;
+  mentorStaffId: string;
+  mentorName: string;
+  admissionDate: string;
+  endDate: string;
+  feeStatus: string;
+  projectStatus: string;
+  projectTitle: string;
+  studentStatus: string;
+  createdAt: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function asDateString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    return value.toDate().toISOString();
   }
+  return '';
+}
 
-  // 2. Candidate local file paths (Strictly gss-management-system-eef75)
-  const candidatePaths = [
-    path.join(process.cwd(), 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json'),
-    path.join(process.cwd(), '..', 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json'),
-    path.join(process.cwd(), 'firebase-admin-key.json'),
-    path.join(process.cwd(), 'apps', 'web', 'firebase-admin-key.json'),
-    path.join(process.cwd(), '..', 'firebase-admin-key.json'),
-    'C:/Users/jasva/Desktop/project/GMS/gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json',
-    'C:/Users/jasva/Desktop/project/GMS/apps/web/firebase-admin-key.json',
-    'C:/Users/jasva/Desktop/project/GMS/firebase-admin-key.json'
-  ];
+async function readAllDocuments(query: Query): Promise<QueryDocumentSnapshot[]> {
+  const pageSize = 500;
+  const documents: QueryDocumentSnapshot[] = [];
+  let cursor: QueryDocumentSnapshot | undefined;
+  while (true) {
+    const page = await (cursor ? query.startAfter(cursor) : query).limit(pageSize).get();
+    documents.push(...page.docs);
+    if (page.size < pageSize) return documents;
+    cursor = page.docs[page.docs.length - 1];
+  }
+}
 
-  for (const p of candidatePaths) {
-    try {
-      if (fs.existsSync(/*turbopackIgnore: true*/ p)) {
-        const content = fs.readFileSync(/*turbopackIgnore: true*/ p, 'utf8');
-        const parsed = JSON.parse(content);
-        if (parsed.project_id === 'gss-management-system-eef75' && parsed.private_key) {
-          return parsed;
-        } else if (parsed.project_id && parsed.project_id !== 'gss-management-system-eef75') {
-          console.warn(`[FirebaseAdmin] Rejected non-GSS service account key at ${p} (project: ${parsed.project_id})`);
+function mapFirestoreUser(id: string, data: Record<string, unknown>): UserAuthRecord {
+  const roleValue = asString(data.role).toLowerCase();
+  const roles: UserRole[] = ['superadmin', 'admin', 'hr', 'employee', 'intern'];
+  const statusValue = asString(data.status).toLowerCase();
+  const statuses: UserStatus[] = ['active', 'pending', 'rejected', 'disabled'];
+  const branches: Branch[] = ['Coimbatore', 'Chennai', 'Madurai', 'Erode'];
+  if (!roles.includes(roleValue as UserRole) || !statuses.includes(statusValue as UserStatus) || !branches.includes(data.branch as Branch)) {
+    throw new Error(`Invalid user profile schema for record ${id}.`);
+  }
+  const primarySpecialization = asString(data.specialization || data.designation, 'Operations');
+  return {
+    id: asString(data.employeeId, id),
+    uid: asString(data.uid, id),
+    name: asString(data.name, 'Staff Member'),
+    email: asString(data.email || data.gmail),
+    mobile: asString(data.mobile),
+    role: roleValue as UserRole,
+    status: statusValue as UserStatus,
+    branch: data.branch as Branch,
+    specialization: primarySpecialization,
+    specializations: Array.isArray(data.specializations)
+      ? data.specializations.filter((value): value is string => typeof value === 'string')
+      : (typeof data.specialization === 'string' ? [data.specialization] : []),
+    majorSpecialization: asString(data.majorSpecialization, primarySpecialization),
+    additionalSpecializations: Array.isArray(data.additionalSpecializations)
+      ? data.additionalSpecializations.filter((value): value is string => typeof value === 'string')
+      : [],
+    startMonthYear: asString(data.startMonthYear),
+    startDate: asString(data.startDate),
+    endDate: asString(data.endDate),
+    passwordHash: asString(data.passwordHash) || undefined,
+    password: asString(data.password) || undefined,
+    createdAt: asDateString(data.createdAt),
+  };
+}
+
+function loadServiceAccountKey(): FirebaseServiceAccount | null {
+  let keyContent = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+
+  if (!keyContent) {
+    const possiblePaths = [
+      path.join(process.cwd(), 'firebase-admin-key.json'),
+      path.join(process.cwd(), '..', 'firebase-admin-key.json'),
+      path.join(process.cwd(), 'apps', 'web', 'firebase-admin-key.json'),
+      path.join(process.cwd(), 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json'),
+      path.join(process.cwd(), '..', 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json'),
+      'c:\\Users\\jasva\\Desktop\\project\\GMS\\apps\\web\\firebase-admin-key.json',
+      'c:\\Users\\jasva\\Desktop\\project\\GMS\\gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json',
+      'c:\\Users\\jasva\\Desktop\\project\\GMS\\firebase-admin-key.json',
+    ];
+    for (const p of possiblePaths) {
+      try {
+        if (fs.existsSync(/*turbopackIgnore: true*/ p)) {
+          keyContent = fs.readFileSync(/*turbopackIgnore: true*/ p, 'utf-8');
+          break;
         }
-      }
-    } catch {
-      // Continue to next candidate
+      } catch {}
     }
   }
 
-  // Do not ship service account credentials in source. Configure FIREBASE_SERVICE_ACCOUNT_KEY or a local ignored key file.
-  return null;
+  if (!keyContent) return null;
+  try {
+    const parsed = JSON.parse(keyContent) as FirebaseServiceAccount;
+    const expectedProject = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'gss-management-system-eef75';
+    if (!expectedProject || (parsed.project_id && parsed.project_id !== expectedProject) || typeof parsed.private_key !== 'string' || typeof parsed.client_email !== 'string') {
+      throw new Error('Firebase service account does not match FIREBASE_PROJECT_ID or is incomplete.');
+    }
+    return parsed;
+  } catch (error) {
+    console.error('[FirebaseAdmin] Service account configuration is invalid:', errorMessage(error));
+    return null;
+  }
 }
 
 export function getAdminApp(): App | null {
@@ -69,32 +164,24 @@ export function getAdminApp(): App | null {
     return adminApp;
   }
 
-  const sa = loadServiceAccountKey();
-  if (!sa) {
-    console.warn('[FirebaseAdmin] No service account key found. Admin features will run in mock/local mode.');
-    return null;
-  }
-
-  if (sa.project_id !== 'gss-management-system-eef75') {
-    throw new Error(`[FirebaseAdmin] Unauthorized database connection rejected. Configured: ${sa.project_id}, Expected: gss-management-system-eef75`);
-  }
-  if (!sa.private_key || !sa.client_email) {
-    throw new Error('[FirebaseAdmin] Service account credentials are incomplete.');
-  }
-
   try {
-    const formattedSa = {
-      projectId: sa.project_id,
-      clientEmail: sa.client_email,
-      privateKey: sa.private_key.replace(/\\n/g, '\n')
-    };
+    const sa = loadServiceAccountKey();
+    if (!sa) {
+      console.warn('[FirebaseAdmin] No valid service account key found. Firebase Admin features will be unavailable.');
+      return null;
+    }
+    const projectId = (sa.project_id as string) || process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'gss-management-system-eef75';
     adminApp = initializeApp({
-      credential: cert(formattedSa),
-      projectId: 'gss-management-system-eef75'
+      credential: cert({
+        projectId,
+        clientEmail: sa.client_email as string,
+        privateKey: (sa.private_key as string).replace(/\\n/g, '\n'),
+      }),
+      projectId,
     });
     return adminApp;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] Initialization error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] Initialization error:', errorMessage(err));
     return null;
   }
 }
@@ -116,6 +203,37 @@ export function getAdminAuth(): Auth | null {
   if (!app) return null;
   adminAuth = getAuth(app);
   return adminAuth;
+}
+
+/** Resolve a Firebase UID to a strictly validated, credential-free app profile. */
+export async function getFirestoreUserByUid(uid: string): Promise<User | null> {
+  const db = getAdminFirestore();
+  if (!db || !uid) return null;
+  try {
+    const direct = await db.collection('users').doc(uid).get();
+    const snapshot = direct.exists
+      ? direct
+      : (await db.collection('users').where('uid', '==', uid).limit(1).get()).docs[0];
+    if (!snapshot?.exists) return null;
+    const data = snapshot.data() ?? {};
+    const role = asString(data.role).toLowerCase() as UserRole;
+    const status = asString(data.status).toLowerCase() as UserStatus;
+    const branch = asString(data.branch) as Branch;
+    if (!['superadmin', 'admin', 'hr', 'employee', 'intern'].includes(role)) return null;
+    if (!['active', 'pending', 'rejected', 'disabled'].includes(status)) return null;
+    if (!['Coimbatore', 'Chennai', 'Madurai', 'Erode'].includes(branch)) return null;
+    return {
+      id: asString(data.employeeId, snapshot.id),
+      uid: asString(data.uid, snapshot.id),
+      name: asString(data.name), email: asString(data.email || data.gmail),
+      mobile: asString(data.mobile), role, status: status as UserStatus,
+      branch, specialization: asString(data.specialization),
+      createdAt: asDateString(data.createdAt),
+    };
+  } catch (error) {
+    console.error('[FirebaseAdmin] Profile lookup failed:', errorMessage(error));
+    return null;
+  }
 }
 
 /**
@@ -157,14 +275,12 @@ export async function syncUserToFirestore(userData: {
       startMonthYear: userData.startMonthYear || '',
       startDate: userData.startDate || '',
       endDate: userData.endDate || '',
-      ...(userData.passwordHash ? { passwordHash: userData.passwordHash } : {}),
-      ...(userData.password ? { password: userData.password } : {}),
       updatedAt: new Date().toISOString(),
       createdAt: userData.createdAt || new Date().toISOString()
     }, { merge: true });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] syncUserToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] syncUserToFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -176,12 +292,12 @@ export async function syncTaskToFirestore(taskData: {
   id: string;
   title: string;
   description: string;
-  assignedBy: any;
+  assignedBy: AssignedTask['assignedBy'];
   targetType: string;
   targetUserId?: string;
   targetUserName?: string;
   targetUserRole?: string;
-  targetGroup?: any;
+  targetGroup?: TaskGroupTarget;
   assignedToUserIds?: string[];
   priority: string;
   dueDate?: string;
@@ -197,8 +313,8 @@ export async function syncTaskToFirestore(taskData: {
       updatedAt: new Date().toISOString()
     }, { merge: true });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] syncTaskToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] syncTaskToFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -226,7 +342,7 @@ export async function syncWorklogToFirestore(logData: {
   if (!db) return false;
 
   try {
-    const cleanData: Record<string, any> = {
+    const cleanData: Record<string, unknown> = {
       ...logData,
       updatedAt: new Date().toISOString()
     };
@@ -242,8 +358,8 @@ export async function syncWorklogToFirestore(logData: {
 
     await docRef.set(cleanData, { merge: true });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] syncWorklogToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] syncWorklogToFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -267,7 +383,7 @@ export async function syncAttendanceToFirestore(attData: {
   if (!db) return false;
 
   try {
-    const cleanData: Record<string, any> = {};
+    const cleanData: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(attData)) {
       if (v !== undefined) cleanData[k] = v;
     }
@@ -275,8 +391,8 @@ export async function syncAttendanceToFirestore(attData: {
 
     await db.collection('attendance').doc(attData.id).set(cleanData, { merge: true });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] syncAttendanceToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] syncAttendanceToFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -301,19 +417,35 @@ export async function syncStudentToFirestore(studentData: {
   endDate?: string;
   feeStatus?: string;
   projectStatus?: string;
+  projectTitle?: string;
   studentStatus?: string;
+  actor: Pick<User, 'id' | 'name' | 'role'>;
 }): Promise<boolean> {
   const db = getAdminFirestore();
   if (!db) return false;
 
   try {
-    await db.collection('students').doc(studentData.studentId).set({
-      ...studentData,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
+    const now = new Date().toISOString();
+    const { actor, ...studentRecord } = studentData;
+    const branchCodes: Record<string, string> = { Chennai: 'CHN', Coimbatore: 'CBE', Madurai: 'MDU', Erode: 'ERD' };
+    const studentRef = db.collection('students').doc(studentData.studentId);
+    const projectionRef = db.collection('projection_jobs').doc(`student:${studentData.studentId}:${randomUUID()}`);
+    const auditId = `audit_${randomUUID()}`;
+    const auditRef = db.collection('audit_logs').doc(auditId);
+    const auditProjectionRef = db.collection('projection_jobs').doc(`audit:${auditId}`);
+    await db.runTransaction(async transaction => {
+      transaction.set(studentRef, { ...studentRecord, branchId: branchCodes[studentData.branch] || studentData.branch, updatedAt: now }, { merge: true });
+      transaction.create(projectionRef, { id: projectionRef.id, type: 'student.upsert', entityId: studentData.studentId, branchId: branchCodes[studentData.branch] || studentData.branch, state: 'pending', attempts: 0, createdAt: now });
+      transaction.create(auditRef, {
+        id: auditId, timestamp: now, createdAt: now,
+        userId: actor.id, userName: actor.name, role: actor.role,
+        action: 'STUDENT_UPSERT', module: 'STUDENTS', recordId: studentData.studentId, branch: studentData.branch,
+      });
+      transaction.create(auditProjectionRef, { id: auditProjectionRef.id, type: 'audit.project', entityId: auditId, branchId: branchCodes[studentData.branch] || studentData.branch, state: 'pending', attempts: 0, createdAt: now });
+    });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] syncStudentToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] syncStudentToFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -321,72 +453,34 @@ export async function syncStudentToFirestore(studentData: {
 /**
  * Fetch all users from Firestore `users` collection.
  */
-export async function getFirestoreUsers(): Promise<any[]> {
+export async function getFirestoreUsers(): Promise<UserAuthRecord[]> {
   const db = getAdminFirestore();
-  if (!db) return [];
+  if (!db) throw new Error('Firestore is unavailable.');
 
   try {
-    const snap = await db.collection('users').get();
-    return snap.docs.map((doc) => {
-      const d = doc.data();
-      return {
-        id: doc.id,
-        name: d.name || 'Staff Member',
-        email: d.email || d.gmail || '',
-        mobile: d.mobile || '',
-        role: (d.role?.toLowerCase() as any) || 'intern',
-        status: (d.status as any) || 'pending',
-        branch: d.branch || 'Coimbatore',
-        specialization: d.specialization || d.designation || 'Operations',
-        specializations: d.specializations || (d.specialization ? [d.specialization] : []),
-        majorSpecialization: d.majorSpecialization || d.specialization || 'Operations',
-        additionalSpecializations: d.additionalSpecializations || [],
-        startMonthYear: d.startMonthYear || '',
-        startDate: d.startDate || '',
-        endDate: d.endDate || '',
-        createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.passwordHash || d.password || undefined
-      };
-    });
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreUsers error:', err?.message || err);
-    return [];
+    const docs = await readAllDocuments(db.collection('users'));
+    return docs.map(doc => mapFirestoreUser(doc.id, doc.data()));
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreUsers error:', errorMessage(err));
+    throw new Error('Firestore user directory read failed.');
   }
 }
 
 /**
  * Fetch a specific user from Firestore `users` collection by ID.
  */
-export async function getFirestoreUserById(id: string): Promise<any | null> {
+export async function getFirestoreUserById(id: string): Promise<UserAuthRecord | null> {
   const db = getAdminFirestore();
   if (!db || !id) return null;
 
   try {
-    const docSnap = await db.collection('users').doc(id).get();
-    if (docSnap.exists) {
-      const d = docSnap.data()!;
-      return {
-        id: docSnap.id,
-        name: d.name || 'Staff Member',
-        email: d.email || d.gmail || '',
-        mobile: d.mobile || '',
-        role: (d.role?.toLowerCase() as any) || 'intern',
-        status: (d.status as any) || 'pending',
-        branch: d.branch || 'Coimbatore',
-        specialization: d.specialization || d.designation || 'Operations',
-        specializations: d.specializations || (d.specialization ? [d.specialization] : []),
-        majorSpecialization: d.majorSpecialization || d.specialization || 'Operations',
-        additionalSpecializations: d.additionalSpecializations || [],
-        startMonthYear: d.startMonthYear || '',
-        startDate: d.startDate || '',
-        endDate: d.endDate || '',
-        createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.passwordHash || d.password || undefined
-      };
-    }
+    const direct = await db.collection('users').doc(id).get();
+    if (direct.exists) return mapFirestoreUser(direct.id, direct.data()!);
+    const byEmployeeId = await db.collection('users').where('employeeId', '==', id).limit(1).get();
+    if (!byEmployeeId.empty) return mapFirestoreUser(byEmployeeId.docs[0].id, byEmployeeId.docs[0].data());
     return null;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreUserById error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreUserById error:', errorMessage(err));
     return null;
   }
 }
@@ -432,7 +526,7 @@ export async function getNextProfessionalUserId(role?: string): Promise<string> 
 /**
  * Fetch a user from Firestore `users` collection by email, gmail, mobile, or doc ID.
  */
-export async function getFirestoreUserByIdentifier(identifier: string): Promise<any | null> {
+export async function getFirestoreUserByIdentifier(identifier: string): Promise<UserAuthRecord | null> {
   const db = getAdminFirestore();
   if (!db || !identifier) return null;
 
@@ -440,28 +534,21 @@ export async function getFirestoreUserByIdentifier(identifier: string): Promise<
     const cleanId = identifier.trim().toLowerCase();
     const digitsOnly = identifier.replace(/\D/g, '');
 
+    // Resolve phone identifiers through the private normalized index first.
+    if (digitsOnly.length >= 10) {
+      const phoneKey = `+91${digitsOnly.slice(-10)}`;
+      const phoneIndex = await db.collection('phoneIndex').doc(phoneKey).get();
+      const indexedUid = phoneIndex.exists ? asString(phoneIndex.data()?.uid) : '';
+      if (indexedUid) {
+        const indexedProfile = await getFirestoreUserByUid(indexedUid);
+        if (indexedProfile) return indexedProfile;
+      }
+    }
+
     // 1. Check doc ID directly
     const directDoc = await db.collection('users').doc(identifier).get();
     if (directDoc.exists) {
-      const d = directDoc.data()!;
-      return {
-        id: directDoc.id,
-        name: d.name || 'Staff Member',
-        email: d.email || d.gmail || cleanId,
-        mobile: d.mobile || '',
-        role: (d.role?.toLowerCase() as any) || 'intern',
-        status: (d.status as any) || 'pending',
-        branch: d.branch || 'Coimbatore',
-        specialization: d.specialization || d.designation || 'Operations',
-        specializations: d.specializations || (d.specialization ? [d.specialization] : []),
-        majorSpecialization: d.majorSpecialization || d.specialization || 'Operations',
-        additionalSpecializations: d.additionalSpecializations || [],
-        startMonthYear: d.startMonthYear || '',
-        startDate: d.startDate || '',
-        endDate: d.endDate || '',
-        createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.passwordHash || d.password || undefined
-      };
+      return mapFirestoreUser(directDoc.id, directDoc.data()!);
     }
 
     // 2. Query email
@@ -475,29 +562,11 @@ export async function getFirestoreUserByIdentifier(identifier: string): Promise<
 
     if (!snap.empty) {
       const doc = snap.docs[0];
-      const d = doc.data()!;
-      return {
-        id: doc.id,
-        name: d.name || 'Staff Member',
-        email: d.email || d.gmail || cleanId,
-        mobile: d.mobile || '',
-        role: (d.role?.toLowerCase() as any) || 'intern',
-        status: (d.status as any) || 'pending',
-        branch: d.branch || 'Coimbatore',
-        specialization: d.specialization || d.designation || 'Operations',
-        specializations: d.specializations || (d.specialization ? [d.specialization] : []),
-        majorSpecialization: d.majorSpecialization || d.specialization || 'Operations',
-        additionalSpecializations: d.additionalSpecializations || [],
-        startMonthYear: d.startMonthYear || '',
-        startDate: d.startDate || '',
-        endDate: d.endDate || '',
-        createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-        passwordHash: d.passwordHash || d.password || undefined
-      };
+      return mapFirestoreUser(doc.id, doc.data()!);
     }
     return null;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreUserByIdentifier error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreUserByIdentifier error:', errorMessage(err));
     return null;
   }
 }
@@ -532,8 +601,8 @@ export async function deleteUserFromFirestore(userId: string, email?: string, mo
     }
 
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] deleteUserFromFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] deleteUserFromFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -541,7 +610,7 @@ export async function deleteUserFromFirestore(userId: string, email?: string, mo
 /**
  * Sync Branch definition to Firestore `branches` collection.
  */
-export async function syncBranchToFirestore(branch: any): Promise<boolean> {
+export async function syncBranchToFirestore(branch: Record<string, unknown> & { branchId: string }): Promise<boolean> {
   const db = getAdminFirestore();
   if (!db) return false;
 
@@ -551,8 +620,8 @@ export async function syncBranchToFirestore(branch: any): Promise<boolean> {
       updatedAt: new Date().toISOString()
     }, { merge: true });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] syncBranchToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] syncBranchToFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -560,7 +629,7 @@ export async function syncBranchToFirestore(branch: any): Promise<boolean> {
 /**
  * Fetch all branches from Firestore.
  */
-export async function getFirestoreBranches(): Promise<any[]> {
+export async function getFirestoreBranches(): Promise<Array<Record<string, unknown> & { id: string }>> {
   const db = getAdminFirestore();
   if (!db) return [];
 
@@ -570,8 +639,8 @@ export async function getFirestoreBranches(): Promise<any[]> {
       id: doc.id,
       ...doc.data()
     }));
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreBranches error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreBranches error:', errorMessage(err));
     return [];
   }
 }
@@ -594,8 +663,8 @@ export async function seedDefaultBranchesToFirestore(): Promise<number> {
       count++;
     }
     return count;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] seedDefaultBranchesToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] seedDefaultBranchesToFirestore error:', errorMessage(err));
     return 0;
   }
 }
@@ -607,18 +676,20 @@ export async function getFirestoreTasks(filter?: {
   role?: string;
   userId?: string;
   branch?: string;
-}): Promise<any[]> {
+}): Promise<AssignedTask[]> {
   const db = getAdminFirestore();
-  if (!db) return [];
+  if (!db) throw new Error('Firestore is unavailable.');
 
   try {
-    const snap = await db.collection('tasks').limit(150).get();
-    let tasks = snap.docs.map(doc => {
+    const docs = await readAllDocuments(db.collection('tasks'));
+    const tasks: AssignedTask[] = docs.map(doc => {
       const d = doc.data();
       return {
         id: doc.id,
         title: d.title || '',
         description: d.description || '',
+        branch: d.branch || '',
+        branchId: d.branchId || '',
         assignedBy: d.assignedBy || { id: 'SYSTEM', name: 'Management', role: 'admin' },
         targetType: d.targetType || 'individual',
         targetUserId: d.targetUserId,
@@ -628,9 +699,9 @@ export async function getFirestoreTasks(filter?: {
         assignedToUserIds: d.assignedToUserIds || (d.targetUserId ? [d.targetUserId] : []),
         priority: d.priority || 'medium',
         dueDate: d.dueDate || '',
-        status: d.status || 'pending',
-        createdAt: d.createdAt || new Date().toISOString(),
-        updatedAt: d.updatedAt || new Date().toISOString()
+        status: (['pending', 'in_progress', 'completed', 'partially_stopped'].includes(d.status) ? d.status : 'pending') as TaskStatus,
+        createdAt: d.createdAt || '',
+        updatedAt: d.updatedAt || ''
       };
     });
 
@@ -640,6 +711,8 @@ export async function getFirestoreTasks(filter?: {
     if (role === 'superadmin') {
       return tasks;
     }
+
+    if (!userId) return [];
 
     if (role === 'admin') {
       return tasks.filter(t =>
@@ -654,9 +727,9 @@ export async function getFirestoreTasks(filter?: {
       t.assignedToUserIds?.includes(userId) ||
       t.targetUserId === userId
     );
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreTasks error:', err?.message || err);
-    return [];
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreTasks error:', errorMessage(err));
+    throw new Error('Firestore task read failed.');
   }
 }
 
@@ -673,8 +746,8 @@ export async function updateFirestoreTaskStatus(taskId: string, status: string):
       updatedAt: new Date().toISOString()
     }, { merge: true });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] updateFirestoreTaskStatus error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] updateFirestoreTaskStatus error:', errorMessage(err));
     return false;
   }
 }
@@ -702,8 +775,8 @@ export async function syncNotificationToFirestore(notif: {
       updatedAt: new Date().toISOString()
     }, { merge: true });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] syncNotificationToFirestore error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] syncNotificationToFirestore error:', errorMessage(err));
     return false;
   }
 }
@@ -711,9 +784,9 @@ export async function syncNotificationToFirestore(notif: {
 /**
  * Fetch notifications for a recipient from Firestore.
  */
-export async function getFirestoreNotifications(recipientId: string): Promise<any[]> {
+export async function getFirestoreNotifications(recipientId: string): Promise<TaskNotification[]> {
   const db = getAdminFirestore();
-  if (!db) return [];
+  if (!db) throw new Error('Firestore is unavailable.');
 
   try {
     const snap = await db.collection('notifications')
@@ -724,28 +797,31 @@ export async function getFirestoreNotifications(recipientId: string): Promise<an
     return snap.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
-    })).sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreNotifications error:', err?.message || err);
-    return [];
+    } as TaskNotification)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreNotifications error:', errorMessage(err));
+    throw new Error('Firestore notification read failed.');
   }
 }
 
 /**
  * Mark a single notification as read in Firestore.
  */
-export async function markFirestoreNotificationAsRead(notificationId: string): Promise<boolean> {
+export async function markFirestoreNotificationAsRead(notificationId: string, recipientId: string): Promise<boolean> {
   const db = getAdminFirestore();
   if (!db) return false;
 
   try {
-    await db.collection('notifications').doc(notificationId).set({
+    const ref = db.collection('notifications').doc(notificationId);
+    const existing = await ref.get();
+    if (!existing.exists || existing.data()?.recipientId !== recipientId) return false;
+    await ref.update({
       isRead: true,
       updatedAt: new Date().toISOString()
-    }, { merge: true });
+    });
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] markFirestoreNotificationAsRead error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] markFirestoreNotificationAsRead error:', errorMessage(err));
     return false;
   }
 }
@@ -770,8 +846,8 @@ export async function markAllFirestoreNotificationsAsRead(recipientId: string): 
     }
     await batch.commit();
     return true;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] markAllFirestoreNotificationsAsRead error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] markAllFirestoreNotificationsAsRead error:', errorMessage(err));
     return false;
   }
 }
@@ -782,34 +858,35 @@ export async function markAllFirestoreNotificationsAsRead(recipientId: string): 
 export async function getFirestoreStudents(options?: {
   branch?: string;
   staffId?: string;
-}): Promise<any[]> {
+}): Promise<FirestoreStudentRecord[]> {
   const db = getAdminFirestore();
-  if (!db) return [];
+  if (!db) throw new Error('Firestore is unavailable.');
 
   try {
-    const snap = await db.collection('students').limit(200).get();
-    let students = snap.docs.map((doc: any) => {
+    const docs = await readAllDocuments(db.collection('students'));
+    let students: FirestoreStudentRecord[] = docs.map((doc) => {
       const d = doc.data();
       return {
         id: doc.id,
         studentId: d.studentId || doc.id,
-        studentName: d.studentName || d.name || 'Student',
-        branch: d.branch || 'Coimbatore',
-        college: d.college || 'Engineering College',
-        department: d.department || 'Computer Science',
-        year: d.year || 'IV',
-        email: d.email || `${(d.studentId || doc.id).toLowerCase()}@student.guvi.in`,
-        mobile: d.mobile || '+91 98765 43210',
-        course: d.course || 'Internship',
-        domain: d.domain || 'Full Stack Web (MERN)',
+        studentName: d.studentName || d.name || '',
+        branch: d.branch || '',
+        college: d.college || '',
+        department: d.department || '',
+        year: d.year || '',
+        email: d.email || '',
+        mobile: d.mobile || '',
+        course: d.course || '',
+        domain: d.domain || '',
         mentorStaffId: d.mentorStaffId || '',
-        mentorName: d.mentorName || 'Staff Mentor',
-        admissionDate: d.admissionDate || d.startDate || '2026-07-01',
-        endDate: d.endDate || '2026-09-30',
-        feeStatus: d.feeStatus || 'Pending',
-        projectStatus: d.projectStatus || 'Ongoing',
-        studentStatus: d.studentStatus || 'Active',
-        createdAt: d.createdAt || new Date().toISOString()
+        mentorName: d.mentorName || '',
+        admissionDate: d.admissionDate || d.startDate || '',
+        endDate: d.endDate || '',
+        feeStatus: d.feeStatus || '',
+        projectStatus: d.projectStatus || '',
+        projectTitle: d.projectTitle || '',
+        studentStatus: d.studentStatus || '',
+        createdAt: d.createdAt || ''
       };
     });
 
@@ -826,9 +903,9 @@ export async function getFirestoreStudents(options?: {
     }
 
     return students;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreStudents error:', err?.message || err);
-    return [];
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreStudents error:', errorMessage(err));
+    throw new Error('Firestore student read failed.');
   }
 }
 
@@ -839,59 +916,39 @@ export async function getFirestoreWorklogs(options?: {
   userId?: string;
   branch?: string;
   date?: string;
-}): Promise<any[]> {
+}): Promise<WorkLogEntry[]> {
   const db = getAdminFirestore();
-  if (!db) return [];
+  if (!db) throw new Error('Firestore is unavailable.');
 
   try {
-    let query: any = db.collection('daily_worklogs');
+    let query: Query = db.collection('daily_worklogs');
     if (options?.userId) {
       query = query.where('userId', '==', options.userId);
     }
     if (options?.date) {
       query = query.where('date', '==', options.date);
     }
-    const snap = await query.limit(200).get();
-    let logs = snap.docs.map((doc: any) => ({
+    const docs = await readAllDocuments(query);
+    let logs: WorkLogEntry[] = docs.map((doc) => ({
       id: doc.id,
       ...doc.data()
-    }));
+    } as WorkLogEntry));
 
     if (options?.branch && options.branch !== 'all') {
-      logs = logs.filter((l: any) => l.branch === options.branch);
+      logs = logs.filter((log) => log.branch === options.branch);
     }
 
     return logs;
-  } catch (err: any) {
-    try {
-      const snap = await db.collection('daily_worklogs').limit(200).get();
-      let logs = snap.docs.map((doc: any) => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      if (options?.userId) {
-        logs = logs.filter((l: any) => l.userId === options.userId);
-      }
-      if (options?.branch && options.branch !== 'all') {
-        logs = logs.filter((l: any) => l.branch === options.branch);
-      }
-      if (options?.date) {
-        logs = logs.filter((l: any) => l.date === options.date);
-      }
-
-      return logs;
-    } catch (fallbackErr: any) {
-      console.error('[FirebaseAdmin] getFirestoreWorklogs error:', fallbackErr?.message || fallbackErr);
-      return [];
-    }
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreWorklogs error:', errorMessage(err));
+    throw new Error('Firestore worklog read failed.');
   }
 }
 
 /**
  * Fetch a specific Worklog from Firestore `daily_worklogs` collection by ID.
  */
-export async function getFirestoreWorklogById(id: string): Promise<any | null> {
+export async function getFirestoreWorklogById(id: string): Promise<WorkLogEntry | null> {
   const db = getAdminFirestore();
   if (!db || !id) return null;
 
@@ -901,11 +958,11 @@ export async function getFirestoreWorklogById(id: string): Promise<any | null> {
       return {
         id: docSnap.id,
         ...docSnap.data()
-      };
+      } as WorkLogEntry;
     }
     return null;
-  } catch (err: any) {
-    console.error('[FirebaseAdmin] getFirestoreWorklogById error:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] getFirestoreWorklogById error:', errorMessage(err));
     return null;
   }
 }

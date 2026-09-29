@@ -12,8 +12,7 @@ import {
   FileSpreadsheet,
   Settings,
   ShieldCheck,
-  GraduationCap,
-  BookOpen
+  GraduationCap
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 

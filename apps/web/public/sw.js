@@ -5,9 +5,9 @@
  * ============================================================================
  */
 
-const CACHE_NAME = 'gss-management-v1';
+const CACHE_NAME = 'gss-management-static-v2';
+const CACHE_PREFIX = 'gss-management-';
 const PRECACHE_ASSETS = [
-  '/',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
@@ -31,7 +31,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME) {
+          if (key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME) {
             return caches.delete(key);
           }
         })
@@ -47,8 +47,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // API calls should never be cached by service worker
-  if (event.request.url.includes('/api/')) {
+  const url = new URL(event.request.url);
+  // Never cache authenticated pages, API responses, or cross-origin content.
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || event.request.mode === 'navigate') {
+    return;
+  }
+
+  // Cache only immutable Next.js build assets and known public app assets.
+  const isStaticAsset = url.pathname.startsWith('/_next/static/') ||
+    /^\/(?:manifest\.json|icon-(?:192|512)\.png|favicon\.ico)$/.test(url.pathname) ||
+    /\.(?:css|js|woff2?|png|svg|ico)$/.test(url.pathname);
+  if (!isStaticAsset) {
     return;
   }
 
@@ -65,12 +74,8 @@ self.addEventListener('fetch', (event) => {
         return networkResponse;
       })
       .catch(() => {
-        // Offline fallback
         return caches.match(event.request).then((cachedResponse) => {
           if (cachedResponse) return cachedResponse;
-          if (event.request.mode === 'navigate') {
-            return caches.match('/');
-          }
           return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
         });
       })

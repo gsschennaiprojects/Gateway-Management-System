@@ -19,14 +19,12 @@ import {
   getColumnsForType,
   getWorkingDaysForMonth,
   isDateBefore,
-  isDateAfter,
   COMMON_SHEET_NAMES,
   STAFF_DIRECTORY_COLUMNS,
   WORKLOG_COLUMNS,
   STUDENT_COLUMNS,
   TASK_COLUMNS,
   ATTENDANCE_TRACKER_COLUMNS,
-  type SheetType,
   type StudentTrackerItem,
   type AttendanceTrackerData,
 } from './sheets-config';
@@ -541,7 +539,10 @@ export interface StudentRow {
   endDate: string;
   feeStatus: string;
   projectStatus: string;
+  projectTitle: string;
   studentStatus: string;
+  branch?: string;
+  mentorStaffId?: string;
   moduleName: string;
   topicCovered: string;
   dailyScore: string;
@@ -573,6 +574,7 @@ export async function getMentorStudents(
     endDate: row[10] || '',
     feeStatus: row[11] || '',
     projectStatus: row[12] || '',
+    projectTitle: row[19] || '',
     studentStatus: row[13] || '',
     moduleName: row[14] || '',
     topicCovered: row[15] || '',
@@ -941,9 +943,7 @@ export async function appendBranchTaskAllocation(
  */
 export async function createStaffSubsheets(
   spreadsheetId: string,
-  staffId: string,
-  staffName?: string,
-  role?: string
+  staffId: string
 ): Promise<{ success: boolean; createdTabs: string[] }> {
   const wlTab = getWorklogTabName(staffId);
   const stuTab = getStudentTabName(staffId);
@@ -1006,6 +1006,7 @@ export async function deleteStaffSubsheets(
 export interface BranchStudentRow {
   studentId: string;
   studentName: string;
+  branch?: string;
   college: string;
   department: string;
   year: string;
@@ -1019,6 +1020,7 @@ export interface BranchStudentRow {
   endDate: string;
   feeStatus: string;
   projectStatus: string;
+  projectTitle?: string;
   studentStatus: string;
 }
 
@@ -1385,8 +1387,8 @@ export async function saveAttendanceTracker(
       const cLetter = numberToColLetter(i + 3);
       return `=COUNTIF(${cLetter}${firstStuRow}:${cLetter}${lastStuRow}, "Present")`;
     }),
-    students.map((_: any, i: number) => `${colTotPres}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_: any, i: number) => `${colTotPres}${firstStuRow + i * 2}`).join('+')}` : '',
-    students.map((_: any, i: number) => `${colTotAbs}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_: any, i: number) => `${colTotAbs}${firstStuRow + i * 2}`).join('+')}` : '',
+    students.map((_, i) => `${colTotPres}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_, i) => `${colTotPres}${firstStuRow + i * 2}`).join('+')}` : '',
+    students.map((_, i) => `${colTotAbs}${firstStuRow + i * 2}`).join('+') ? `=${students.map((_, i) => `${colTotAbs}${firstStuRow + i * 2}`).join('+')}` : '',
     '',
     '',
     ''
@@ -1403,7 +1405,7 @@ export async function saveAttendanceTracker(
     '',
     '',
     '',
-    students.map((_: any, i: number) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+') ? `=${students.map((_: any, i: number) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+')}` : '',
+    students.map((_, i) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+') ? `=${students.map((_, i) => `${colTskComp}${firstStuRow + 1 + i * 2}`).join('+')}` : '',
     ''
   ];
   blockRows.push(dailyTasksRow);
@@ -1439,10 +1441,6 @@ export async function appendNextMonthAttendanceTracker(
     return existing;
   }
 
-  // Read raw sheet rows to find last row
-  const tabName = getAttendanceTrackerTabName(staffId);
-  const rows = await readSheet(spreadsheetId, tabName);
-
   // Fetch all students for this mentor to filter active vs completed
   const dirStudents = await getMentorStudents(spreadsheetId, staffId);
 
@@ -1458,7 +1456,6 @@ export async function appendNextMonthAttendanceTracker(
   });
 
   const workingDays = getWorkingDaysForMonth(targetYear, targetMonth);
-  const startRowOffset = rows.length + 4; // 4-row gap
 
   const trackerStudents: StudentTrackerItem[] = activeStudents.map(s => ({
     studentId: s.studentId,
@@ -1501,6 +1498,3 @@ function numberToColLetter(n: number): string {
   }
   return r;
 }
-
-
-

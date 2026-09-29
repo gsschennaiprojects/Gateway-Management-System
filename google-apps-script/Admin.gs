@@ -60,7 +60,7 @@ const Admin = {
     const row = [
       adminId,
       data.Admin_Name || '',
-      data.Branch_ID || GSS_CONFIG.BRANCHES.BRANCH_01.ID,
+      data.Branch_ID || getCurrentBranchConfig().ID,
       data.Email || '',
       data.Mobile || '',
       data.Designation || 'Branch Administrator',

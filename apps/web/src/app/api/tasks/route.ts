@@ -1,259 +1,142 @@
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import {
-  getAllTasks,
-  getTasksForUser,
-  getTasksAssignedByUser,
-  createTask,
-  updateTaskStatus
-} from '@/lib/tasks/task-store';
-import { syncTaskToFirestore } from '@/lib/firebase/firebase-admin';
-import { appendBranchTaskAllocation, upsertTask } from '@/lib/sheets/sheets-service';
-import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
+import { getAdminFirestore, getFirestoreTasks, getFirestoreUsers } from '@/lib/firebase/firebase-admin';
+import type { TaskPriority, TaskStatus } from '@/types/task';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  const session = await getSession();
-  if (!session || !session.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const { role, id: userId, branch } = session.user;
-
-  // 1. Authoritative Firestore Fetch
-  let firestoreTasks: any[] = [];
-  try {
-    const { getFirestoreTasks } = await import('@/lib/firebase/firebase-admin');
-    firestoreTasks = await getFirestoreTasks({ role, userId, branch });
-  } catch (err) {
-    console.warn('[Tasks/GET] Firestore fetch notice:', err);
-  }
-
-  // 2. In-memory fallback / merge
-  const inMemAll = getAllTasks();
-  let filteredInMem: any[] = [];
-  if (role === 'superadmin') {
-    filteredInMem = inMemAll;
-  } else if (role === 'admin') {
-    filteredInMem = inMemAll.filter(
-      (t) =>
-        t.assignedBy?.id === userId ||
-        (t.targetGroup?.branch === branch) ||
-        t.assignedToUserIds?.includes(userId)
-    );
-  } else {
-    filteredInMem = getTasksForUser(userId);
-  }
-
-  // 3. Deduplicate by ID with Firestore as source of truth
-  const taskMap = new Map<string, any>();
-  for (const t of filteredInMem) {
-    taskMap.set(t.id, t);
-  }
-  for (const ft of firestoreTasks) {
-    taskMap.set(ft.id, ft);
-  }
-
-  const tasks = Array.from(taskMap.values()).sort(
-    (a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')
-  );
-
-  return NextResponse.json({ tasks });
+function sameOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get('origin');
+  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl && process.env.NODE_ENV === 'production') return false;
+  return !!origin && origin === (appUrl ? new URL(appUrl).origin : new URL(request.url).origin);
 }
 
-export async function POST(req: NextRequest) {
+export async function GET() {
   const session = await getSession();
-  if (!session || !session.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  // Only Admin and Super Admin can assign tasks
-  if (!['superadmin', 'admin'].includes(session.user.role)) {
-    return NextResponse.json(
-      { error: 'Forbidden: Only Admin and Super Admin can assign tasks.' },
-      { status: 403 }
-    );
-  }
-
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
-    const body = await req.json();
-    const { title, description, targetType, targetUserId, targetGroup, priority, dueDate } = body;
+    const tasks = await getFirestoreTasks({ role: session.user.role, userId: session.user.id, branch: session.user.branch });
+    return NextResponse.json({ tasks });
+  } catch {
+    return NextResponse.json({ error: 'Tasks are temporarily unavailable.' }, { status: 503 });
+  }
+}
 
-    if (!title || !title.trim()) {
-      return NextResponse.json({ error: 'Task title is required.' }, { status: 400 });
+export async function POST(request: NextRequest) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!sameOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (!['admin', 'superadmin'].includes(session.user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (Number(request.headers.get('content-length') || 0) > 20_000) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  try {
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid task.' }, { status: 400 });
+    const input = body as Record<string, unknown>;
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    const description = typeof input.description === 'string' ? input.description.trim() : '';
+    const targetType = input.targetType === 'group' ? 'group' : input.targetType === 'individual' || input.targetType === undefined ? 'individual' : null;
+    const priority = input.priority || 'medium';
+    const dueDate = input.dueDate === undefined || input.dueDate === '' ? '' : input.dueDate;
+    if (!title || title.length > 200 || description.length > 3000 || !targetType || !['low', 'medium', 'high', 'urgent'].includes(String(priority)) ||
+        (dueDate !== '' && (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || Number.isNaN(Date.parse(`${dueDate}T00:00:00Z`))))) {
+      return NextResponse.json({ error: 'Please provide valid task details.' }, { status: 400 });
     }
-
-    if (targetType === 'individual' && !targetUserId) {
-      return NextResponse.json(
-        { error: 'Target user must be specified for individual task assignment.' },
-        { status: 400 }
-      );
+    const users = await getFirestoreUsers();
+    let recipients = [] as typeof users;
+    if (targetType === 'individual') {
+      if (typeof input.targetUserId !== 'string') return NextResponse.json({ error: 'Select a task assignee.' }, { status: 400 });
+      const target = users.find(user => user.id === input.targetUserId || user.uid === input.targetUserId);
+      if (!target || target.status !== 'active' || (session.user.role !== 'superadmin' && target.branch !== session.user.branch)) {
+        return NextResponse.json({ error: 'Task assignee is unavailable.' }, { status: 404 });
+      }
+      recipients = [target];
+    } else {
+      const group = input.targetGroup as { name?: unknown; role?: unknown; branch?: unknown; domain?: unknown } | undefined;
+      if (!group || typeof group.name !== 'string' || group.name.trim().length < 2 || group.name.length > 100) return NextResponse.json({ error: 'Select a valid task group.' }, { status: 400 });
+      const branch = session.user.role === 'superadmin' && typeof group.branch === 'string' ? group.branch : session.user.branch;
+      recipients = users.filter(user => user.status === 'active' && user.branch === branch &&
+        (!group.role || user.role === group.role) && (!group.domain || user.specialization?.toLowerCase().includes(String(group.domain).toLowerCase())));
     }
-
-    if (targetType === 'group' && (!targetGroup || !targetGroup.name)) {
-      return NextResponse.json(
-        { error: 'Target group details must be specified for group task assignment.' },
-        { status: 400 }
-      );
-    }
-
-    // Branch Admin validation: Admin can only target their own branch
-    if (session.user.role === 'admin' && targetGroup) {
-      targetGroup.branch = session.user.branch;
-    }
-
-    const newTask = createTask({
-      title,
-      description: description || '',
-      assignedBy: {
-        id: session.user.id,
-        name: session.user.name,
-        role: session.user.role
-      },
-      targetType: targetType || 'individual',
-      targetUserId,
-      targetGroup,
-      priority: priority || 'medium',
-      dueDate: dueDate || ''
-    });
-
-    // 1. Authoritative Firestore Persistence
-    try {
-      await syncTaskToFirestore({
-        id: newTask.id,
-        title: newTask.title,
-        description: newTask.description,
-        assignedBy: newTask.assignedBy,
-        targetType: newTask.targetType,
-        targetUserId: newTask.targetUserId,
-        targetUserName: newTask.targetUserName,
-        targetUserRole: newTask.targetUserRole,
-        targetGroup: newTask.targetGroup,
-        assignedToUserIds: newTask.assignedToUserIds,
-        priority: newTask.priority,
-        dueDate: newTask.dueDate,
-        status: newTask.status,
-        createdAt: newTask.createdAt
-      });
-
-      // Also persist notifications to Firestore
-      const { syncNotificationToFirestore } = await import('@/lib/firebase/firebase-admin');
-      for (const recipientId of newTask.assignedToUserIds) {
-        const isGroup = newTask.targetType === 'group';
-        await syncNotificationToFirestore({
-          id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          recipientId,
-          title: isGroup
-            ? `Team Task: ${newTask.targetGroup?.name}`
-            : 'New Task Assigned to You',
-          message: isGroup
-            ? `${newTask.assignedBy.name} (${newTask.assignedBy.role}) assigned team task for ${newTask.targetGroup?.name}: "${newTask.title}"`
-            : `${newTask.assignedBy.name} (${newTask.assignedBy.role}) assigned you task: "${newTask.title}"`,
-          type: isGroup ? 'team_task' : 'task_assigned',
-          taskId: newTask.id,
-          teamName: isGroup ? newTask.targetGroup?.name : undefined,
-          isRead: false,
-          createdAt: newTask.createdAt
+    if (!recipients.length || recipients.length > 450) return NextResponse.json({ error: 'Task has no eligible assignees or exceeds the assignment limit.' }, { status: 400 });
+    if (session.user.role === 'admin' && recipients.some(user => !['hr', 'employee', 'intern'].includes(user.role))) return NextResponse.json({ error: 'Admins may assign tasks only to HR, employees, and interns.' }, { status: 403 });
+    const db = getAdminFirestore();
+    if (!db) return NextResponse.json({ error: 'Task storage is unavailable.' }, { status: 503 });
+    const now = new Date().toISOString();
+    const id = `task_${randomUUID()}`;
+    const branchId = recipients[0].branch.toUpperCase();
+    const task = {
+      id, title, description, assignedBy: { id: session.user.id, uid: session.uid, name: session.user.name, role: session.user.role },
+      createdByUid: session.uid, branch: recipients[0].branch, branchId,
+      targetType, targetUserId: targetType === 'individual' ? recipients[0].id : undefined,
+      targetUserName: targetType === 'individual' ? recipients[0].name : undefined,
+      targetUserRole: targetType === 'individual' ? recipients[0].role : undefined,
+      targetGroup: targetType === 'group' ? input.targetGroup : undefined,
+      assignedToUserIds: recipients.map(user => user.id), priority: priority as TaskPriority,
+      dueDate, status: 'pending' as TaskStatus, createdAt: now, updatedAt: now,
+    };
+    const taskRef = db.collection('tasks').doc(id);
+    const projectionRef = db.collection('projection_jobs').doc(`task:${id}:created`);
+    await db.runTransaction(async transaction => {
+      transaction.create(taskRef, task);
+      transaction.create(db.collection('task_history').doc(`${id}:created`), { taskId: id, actorUid: session.uid, fromStatus: null, toStatus: 'pending', createdAt: now });
+      transaction.create(projectionRef, { id: projectionRef.id, type: 'task.upsert', entityId: id, branchId, state: 'pending', attempts: 0, createdAt: now });
+      for (const recipient of recipients) {
+        const notificationId = `task_assigned:${id}:${recipient.id}`;
+        transaction.create(db.collection('notifications').doc(notificationId), {
+          id: notificationId, recipientId: recipient.id, title: targetType === 'group' ? 'Team task assigned' : 'New task assigned',
+          message: `${session.user.name} assigned: ${title}`, type: targetType === 'group' ? 'team_task' : 'task_assigned',
+          taskId: id, isRead: false, createdAt: now,
         });
       }
-    } catch (fsErr) {
-      console.warn('[Tasks/POST] Firestore sync note:', fsErr);
-    }
-
-    // 2. Non-blocking Google Sheets projection
-    try {
-      const branchName = session.user.branch;
-      const branchCode = BRANCH_NAME_TO_CODE[branchName];
-      const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
-
-      if (spreadsheetId) {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const assignedToName = targetUserId || targetGroup?.name || 'Assigned Staff';
-        
-        await Promise.race([
-          (async () => {
-            // Master 05_Task_Allocation
-            await appendBranchTaskAllocation(spreadsheetId, {
-              taskId: newTask.id,
-              dateAssigned: todayStr,
-              assignedById: session.user.id,
-              assignedByName: session.user.name,
-              assignedToId: targetUserId || 'GROUP',
-              assignedToName,
-              taskTitle: newTask.title,
-              description: newTask.description,
-              priority: newTask.priority,
-              category: 'Operations',
-              startDate: todayStr,
-              dueDate: newTask.dueDate || todayStr,
-              completedDate: '-',
-              status: newTask.status,
-              progressPct: '0%',
-              remarks: ''
-            });
-
-            // Dedicated operational subsheet TSK_<ID> if individual assignment
-            if (targetUserId) {
-              await upsertTask(spreadsheetId, targetUserId, {
-                taskId: newTask.id,
-                dateAssigned: todayStr,
-                assignedById: session.user.id,
-                assignedByName: session.user.name,
-                taskTitle: newTask.title,
-                description: newTask.description,
-                priority: (newTask.priority?.charAt(0).toUpperCase() + newTask.priority?.slice(1)) as any,
-                category: 'Operations',
-                startDate: todayStr,
-                dueDate: newTask.dueDate || todayStr,
-                completedDate: '-',
-                status: 'Assigned',
-                progressPct: '0%',
-                remarks: ''
-              });
-            }
-          })(),
-          new Promise((resolve) => setTimeout(resolve, 3500))
-        ]);
-      }
-    } catch (sheetErr) {
-      console.warn('[Tasks/POST] Google Sheets projection note:', sheetErr);
-    }
-
-    return NextResponse.json({ task: newTask }, { status: 201 });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to create task';
-    return NextResponse.json({ error: msg }, { status: 400 });
+    });
+    return NextResponse.json({ task }, { status: 201 });
+  } catch {
+    return NextResponse.json({ error: 'Task could not be saved.' }, { status: 503 });
   }
 }
 
-export async function PATCH(req: NextRequest) {
+export async function PATCH(request: NextRequest) {
   const session = await getSession();
-  if (!session || !session.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!sameOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (Number(request.headers.get('content-length') || 0) > 10_000) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   try {
-    const body = await req.json();
-    const { taskId, status } = body;
-
-    if (!taskId || !status) {
-      return NextResponse.json({ error: 'taskId and status are required.' }, { status: 400 });
-    }
-
-    const updated = updateTaskStatus(taskId, status);
-
-    // Sync updated task to Firestore authoritatively
-    try {
-      const { updateFirestoreTaskStatus } = await import('@/lib/firebase/firebase-admin');
-      await updateFirestoreTaskStatus(taskId, status);
-    } catch (fsErr) {
-      console.warn('[Tasks/PATCH] Firestore sync note:', fsErr);
-    }
-
-    return NextResponse.json({ task: updated });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to update task';
-    return NextResponse.json({ error: msg }, { status: 400 });
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+    const { taskId, status, reason: rawReason } = body as { taskId?: unknown; status?: unknown; reason?: unknown };
+    const reason = typeof rawReason === 'string' ? rawReason.trim() : '';
+    if (typeof taskId !== 'string' || taskId.length > 150 || !['pending', 'in_progress', 'completed', 'partially_stopped'].includes(String(status))) return NextResponse.json({ error: 'Invalid task transition.' }, { status: 400 });
+    if (status === 'partially_stopped' && (reason.length < 10 || reason.length > 1000)) return NextResponse.json({ error: 'Provide a reason of at least 10 characters for a partially stopped task.' }, { status: 400 });
+    const db = getAdminFirestore();
+    if (!db) return NextResponse.json({ error: 'Task storage is unavailable.' }, { status: 503 });
+    const taskRef = db.collection('tasks').doc(taskId);
+    const now = new Date().toISOString();
+    const nextStatus = status as TaskStatus;
+    let updated: Record<string, unknown> = {};
+    await db.runTransaction(async transaction => {
+      const taskSnapshot = await transaction.get(taskRef);
+      if (!taskSnapshot.exists) throw new Error('TASK_NOT_FOUND');
+      const task = taskSnapshot.data()!;
+      const isAssigned = Array.isArray(task.assignedToUserIds) && task.assignedToUserIds.includes(session.user.id);
+      const isManager = session.user.role === 'superadmin' || (session.user.role === 'admin' && task.branch === session.user.branch);
+      if (!isAssigned && !isManager) throw new Error('TASK_FORBIDDEN');
+      if (task.status === nextStatus) { updated = { id: taskId, ...task }; return; }
+      const allowed = task.status === 'pending' && nextStatus === 'in_progress' || task.status === 'in_progress' && (nextStatus === 'completed' || nextStatus === 'partially_stopped');
+      if (!allowed) throw new Error('TASK_CONFLICT');
+      transaction.update(taskRef, { status: nextStatus, updatedAt: now, ...(nextStatus === 'in_progress' ? { startedAt: now } : {}), ...(nextStatus === 'completed' ? { completedAt: now } : {}), ...(nextStatus === 'partially_stopped' ? { stoppedAt: now, stopReason: reason } : {}) });
+      transaction.create(db.collection('task_history').doc(`${taskId}:${randomUUID()}`), { taskId, actorUid: session.uid, fromStatus: task.status, toStatus: nextStatus, ...(nextStatus === 'partially_stopped' ? { reason } : {}), createdAt: now });
+      const projectionRef = db.collection('projection_jobs').doc(`task:${taskId}:${now}`);
+      transaction.create(projectionRef, { id: projectionRef.id, type: 'task.upsert', entityId: taskId, branchId: task.branchId, state: 'pending', attempts: 0, createdAt: now });
+      updated = { id: taskId, ...task, status: nextStatus, updatedAt: now };
+    });
+    return NextResponse.json({ success: true, task: updated });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : '';
+    if (code === 'TASK_NOT_FOUND') return NextResponse.json({ error: 'Task not found.' }, { status: 404 });
+    if (code === 'TASK_FORBIDDEN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (code === 'TASK_CONFLICT') return NextResponse.json({ error: 'Task status transition is not allowed.' }, { status: 409 });
+    return NextResponse.json({ error: 'Task update could not be saved.' }, { status: 503 });
   }
 }

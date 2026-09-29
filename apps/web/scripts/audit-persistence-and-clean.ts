@@ -1,5 +1,5 @@
 import { getAdminFirestore } from '../src/lib/firebase/firebase-admin';
-import { getSheetsApi, deleteRowsMatching, deleteStaffSubsheets } from '../src/lib/sheets/sheets-service';
+import { getSheetsApi, deleteRowsMatching } from '../src/lib/sheets/sheets-service';
 import { BRANCH_SPREADSHEET_MAP } from '../src/lib/seed-branches';
 
 async function auditAndClean() {
@@ -62,14 +62,14 @@ async function auditAndClean() {
 
     // Clean any test rows from core tabs
     const coreTabs = [
-      { tab: '02_Staff_Directory', col: 0 },
-      { tab: '03_Daily_Worklogs', col: 0 },
-      { tab: '04_Staff_Attendance', col: 0 },
-      { tab: '05_Task_Allocation', col: 0 },
-      { tab: '06_Student_Directory', col: 0 }
+      { tab: '02_Staff_Directory' },
+      { tab: '03_Daily_Worklogs' },
+      { tab: '04_Staff_Attendance' },
+      { tab: '05_Task_Allocation' },
+      { tab: '06_Student_Directory' }
     ];
 
-    for (const { tab, col } of coreTabs) {
+    for (const { tab } of coreTabs) {
       if (tabs.includes(tab)) {
         try {
           const res = await sheetsApi.spreadsheets.values.get({
@@ -93,8 +93,9 @@ async function auditAndClean() {
             });
             console.log(`   ✅ Test rows purged from ${tab}`);
           }
-        } catch (e: any) {
-          console.error(`   Error checking rows in ${tab}:`, e.message);
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : String(e);
+          console.error(`   Error checking rows in ${tab}:`, message);
         }
       }
     }
@@ -137,8 +138,9 @@ async function auditAndClean() {
       const ok = (status >= 200 && status < 400);
       console.log(`   [${ok ? 'PASS ✅' : 'FAIL ❌'}] ${r.padEnd(25)} HTTP ${status}`);
       if (ok) passCount++;
-    } catch (e: any) {
-      console.log(`   [FAIL ❌] ${r.padEnd(25)} Error: ${e.message}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.log(`   [FAIL ❌] ${r.padEnd(25)} Error: ${message}`);
     }
   }
 

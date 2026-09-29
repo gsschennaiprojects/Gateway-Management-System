@@ -1,373 +1,163 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getAllUsers,
-  getUsersByBranch,
-  findUserById,
-  updateUserStatus,
-  updateUserRole,
-  deleteUser,
-  stripSensitive
-} from '@/lib/auth/user-store';
+import { randomUUID } from 'crypto';
 import { getSession } from '@/lib/auth/session';
-import { canManageTargetUser, canDeleteUser } from '@/lib/rbac/permissions';
-import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
+import { getAdminAuth, getAdminFirestore, getFirestoreUsers } from '@/lib/firebase/firebase-admin';
+import { canDeleteUser, canManageTargetUser } from '@/lib/rbac/permissions';
+import { BRANCHES, type UserRole, type UserStatus } from '@/types/auth';
+import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  const session = await getSession();
-  if (!session || !session.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  // Allow Super Admin, Admin, and HR to view directory
-  if (!['superadmin', 'admin', 'hr'].includes(session.user.role)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
-  // Fetch all users from Firestore to merge with in-memory users
-  let firestoreUsers: any[] = [];
-  try {
-    const { getFirestoreUsers } = await import('@/lib/firebase/firebase-admin');
-    firestoreUsers = await getFirestoreUsers();
-  } catch (fsErr) {
-    console.warn('[Users/GET] Firestore load note:', fsErr);
-  }
-
-  // Deduplicate and combine users
-  const userMap = new Map<string, any>();
-  for (const u of getAllUsers()) {
-    userMap.set(u.id, u);
-    if (u.email) userMap.set(u.email.toLowerCase(), u);
-  }
-  for (const fu of firestoreUsers) {
-    userMap.set(fu.id, fu);
-    if (fu.email) userMap.set(fu.email.toLowerCase(), fu);
-  }
-  const allUsers = Array.from(new Set(userMap.values()));
-
-  const { searchParams } = new URL(req.url);
-  const branchParam = searchParams.get('branch');
-
-  // Super Admin can view all branches or filter by branch via query param.
-  if (session.user.role === 'superadmin') {
-    const filtered = (branchParam && branchParam !== 'All' && branchParam !== 'all')
-      ? allUsers.filter(u => u.branch === branchParam)
-      : allUsers;
-    return NextResponse.json({ users: filtered.map(stripSensitive) });
-  }
-
-  // Admin and HR have strictly scoped access to their OWN branch (NO passwords)
-  const branchUsers = allUsers.filter(u => u.branch === session.user.branch);
-  return NextResponse.json({ users: branchUsers.map(stripSensitive) });
+function sameOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get('origin');
+  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl && process.env.NODE_ENV === 'production') return false;
+  const expected = appUrl ? new URL(appUrl).origin : new URL(request.url).origin;
+  return origin === expected;
 }
 
-export async function PATCH(req: NextRequest) {
+export async function GET(request: NextRequest) {
   const session = await getSession();
-  if (!session || !session.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  // Only Super Admin and Admin can perform user management operations
-  if (!['superadmin', 'admin'].includes(session.user.role)) {
-    return NextResponse.json({ error: 'Forbidden: Insufficient privileges' }, { status: 403 });
-  }
-
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!['superadmin', 'admin', 'hr'].includes(session.user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   try {
-    const body = await req.json();
-    const { userId, action, status, role } = body;
+    const users = await getFirestoreUsers();
+    const { searchParams } = new URL(request.url);
+    const branchFilter = searchParams.get('branch');
+    const scoped = session.user.role === 'superadmin'
+      ? users.filter(user => !branchFilter || ['All', 'all'].includes(branchFilter) || user.branch === branchFilter)
+      : users.filter(user => user.branch === session.user.branch);
+    return NextResponse.json({ users: scoped });
+  } catch {
+    return NextResponse.json({ error: 'User directory is temporarily unavailable.' }, { status: 503 });
+  }
+}
 
-    let target = findUserById(userId);
-    if (!target) {
-      try {
-        const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
-        const db = getAdminFirestore();
-        if (db) {
-          const docSnap = await db.collection('users').doc(userId).get();
-          if (docSnap.exists) {
-            const d = docSnap.data();
-            target = {
-              id: docSnap.id,
-              name: d?.name || 'Staff Member',
-              email: d?.email || d?.gmail || '',
-              mobile: d?.mobile || '',
-              role: d?.role || 'intern',
-              status: d?.status || 'pending',
-              branch: d?.branch || 'Coimbatore',
-              specialization: d?.specialization || 'Operations',
-              createdAt: d?.createdAt || new Date().toISOString(),
-              passwordHash: d?.password || d?.passwordHash || undefined
-            } as any;
-          }
+export async function PATCH(request: NextRequest) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!sameOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (Number(request.headers.get('content-length') || 0) > 16_384) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (!['superadmin', 'admin'].includes(session.user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  try {
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+    const input = body as Record<string, unknown>;
+    if (Object.hasOwn(input, 'password') || Object.hasOwn(input, 'passwordHash')) return NextResponse.json({ error: 'Use Firebase password reset to change credentials.' }, { status: 400 });
+    if (typeof input.userId !== 'string' || input.userId.length > 150 || typeof input.action !== 'string') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+    if (input.action === 'update_role' && session.user.role !== 'superadmin') return NextResponse.json({ error: 'Only Super Admin can assign roles.' }, { status: 403 });
+    if (input.action === 'edit_staff' && session.user.role !== 'superadmin') return NextResponse.json({ error: 'Only Super Admin can edit staff profiles.' }, { status: 403 });
+    const db = getAdminFirestore();
+    const auth = getAdminAuth();
+    if (!db || !auth) return NextResponse.json({ error: 'User service is unavailable.' }, { status: 503 });
+    const allUsers = await getFirestoreUsers();
+    const target = allUsers.find(item => item.id === input.userId || item.uid === input.userId);
+    if (!target) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+    const isSuperAdmin = session.user.role === 'superadmin';
+    if (target.id === session.user.id || (session.uid && target.uid === session.uid)) return NextResponse.json({ error: 'Users cannot manage their own account.' }, { status: 403 });
+    if (!canManageTargetUser(session.user, target)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (target.role === 'superadmin' && target.id !== session.user.id) return NextResponse.json({ error: 'Super Admin account cannot be managed here.' }, { status: 403 });
+    const uid = target.uid || target.id;
+    const profileRef = db.collection('users').doc(uid);
+    const now = new Date().toISOString();
+    const updates: Record<string, unknown> = { updatedAt: now };
+    let nextRole: UserRole = target.role;
+    let nextStatus: UserStatus = target.status;
+
+    if (input.action === 'update_status') {
+      if (!['active', 'rejected'].includes(String(input.status))) return NextResponse.json({ error: 'Only approval or rejection is allowed.' }, { status: 400 });
+      if (!isSuperAdmin && !['employee', 'intern'].includes(target.role)) return NextResponse.json({ error: 'Only Super Admin can manage elevated accounts.' }, { status: 403 });
+      nextStatus = input.status as UserStatus;
+      updates.status = nextStatus;
+    } else if (input.action === 'update_role') {
+      if (!isSuperAdmin) return NextResponse.json({ error: 'Only Super Admin can assign roles.' }, { status: 403 });
+      if (!['superadmin', 'admin', 'hr', 'employee', 'intern'].includes(String(input.role))) return NextResponse.json({ error: 'Invalid role.' }, { status: 400 });
+      nextRole = input.role as UserRole;
+      updates.role = nextRole;
+    } else if (input.action === 'edit_staff') {
+      if (!isSuperAdmin) return NextResponse.json({ error: 'Only Super Admin can edit staff profiles.' }, { status: 403 });
+      const fields: Array<[string, (value: unknown) => boolean]> = [
+        ['name', value => typeof value === 'string' && value.trim().length >= 2 && value.trim().length <= 100],
+        ['email', value => typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)],
+        ['mobile', value => typeof value === 'string' && value.replace(/\D/g, '').length >= 10],
+        ['branch', value => BRANCHES.includes(value as typeof BRANCHES[number])],
+        ['specialization', value => typeof value === 'string' && value.length <= 200],
+      ];
+      for (const [field, valid] of fields) {
+        if (input[field] === undefined) continue;
+        if (!valid(input[field])) return NextResponse.json({ error: `Invalid ${field}.` }, { status: 400 });
+        updates[field] = field === 'email' ? String(input[field]).trim().toLowerCase()
+          : field === 'mobile' ? `+91${String(input[field]).replace(/\D/g, '').slice(-10)}`
+          : typeof input[field] === 'string' ? input[field].trim() : input[field];
+      }
+      if (input.role !== undefined) {
+        if (!['superadmin', 'admin', 'hr', 'employee', 'intern'].includes(String(input.role))) return NextResponse.json({ error: 'Invalid role.' }, { status: 400 });
+        nextRole = input.role as UserRole; updates.role = nextRole;
+      }
+      if (input.status !== undefined) {
+        if (!['active', 'pending', 'rejected', 'disabled'].includes(String(input.status))) return NextResponse.json({ error: 'Invalid status.' }, { status: 400 });
+        nextStatus = input.status as UserStatus; updates.status = nextStatus;
+      }
+      if (typeof updates.branch === 'string') updates.branchId = BRANCH_NAME_TO_CODE[String(updates.branch)] || String(updates.branch).toUpperCase();
+    } else if (input.action === 'delete') {
+      if (!canDeleteUser(session.user, target)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      nextStatus = 'disabled'; updates.status = nextStatus; updates.disabledAt = now;
+    } else {
+      return NextResponse.json({ error: 'Invalid action.' }, { status: 400 });
+    }
+
+    const previousMobile = `+91${target.mobile.replace(/\D/g, '').slice(-10)}`;
+    const nextMobile = typeof updates.mobile === 'string' ? updates.mobile : previousMobile;
+    const previousPhoneRef = db.collection('phoneIndex').doc(previousMobile);
+    const nextPhoneRef = db.collection('phoneIndex').doc(nextMobile);
+    const jobRef = db.collection('projection_jobs').doc(`staff:${uid}:${randomUUID()}`);
+    const auditId = `audit_${randomUUID()}`;
+    const auditRef = db.collection('audit_logs').doc(auditId);
+    const auditProjectionRef = db.collection('projection_jobs').doc(`audit:${auditId}`);
+    const branch = String(updates.branch || target.branch);
+    const branchId = BRANCH_NAME_TO_CODE[branch] || branch.toUpperCase();
+    const authBefore = await auth.getUser(uid);
+    const authUpdates = {
+      ...(updates.email ? { email: String(updates.email) } : {}),
+      ...(updates.mobile ? { phoneNumber: String(updates.mobile) } : {}),
+      ...(updates.status ? { disabled: nextStatus !== 'active' } : {}),
+    };
+    if (Object.keys(authUpdates).length) await auth.updateUser(uid, authUpdates);
+    try {
+      await db.runTransaction(async transaction => {
+        const current = await transaction.get(profileRef);
+        if (!current.exists) throw new Error('USER_NOT_FOUND');
+        const nextPhone = nextMobile !== previousMobile ? await transaction.get(nextPhoneRef) : null;
+        const previousPhone = nextMobile !== previousMobile ? await transaction.get(previousPhoneRef) : null;
+        if (nextPhone?.exists && nextPhone.data()?.uid !== uid) throw new Error('PHONE_IN_USE');
+        transaction.update(profileRef, updates);
+        if (nextMobile !== previousMobile) {
+          if (previousPhone?.exists && previousPhone.data()?.uid === uid) transaction.delete(previousPhoneRef);
+          transaction.set(nextPhoneRef, { uid, employeeId: target.id, updatedAt: now });
         }
-      } catch (err) {
-        console.warn('[Users/PATCH] Target lookup in Firestore note:', err);
-      }
-    }
-
-    if (!target) {
-      return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
-    }
-
-    // Comprehensive staff editing — ONLY Super Admin is authorized to edit staff data
-    if (action === 'edit_staff') {
-      if (session.user.role !== 'superadmin') {
-        return NextResponse.json(
-          { error: 'Forbidden: Only Super Admin is authorized to edit staff data' },
-          { status: 403 }
-        );
-      }
-
-      const {
-        name,
-        email,
-        mobile,
-        branch,
-        role: newRole,
-        status: newStatus,
-        specialization,
-        password: newPassword
-      } = body;
-
-      if (name && typeof name === 'string') target.name = name.trim();
-      if (email && typeof email === 'string') target.email = email.trim().toLowerCase();
-      if (mobile && typeof mobile === 'string') target.mobile = mobile.trim();
-      if (branch && typeof branch === 'string') target.branch = branch as any;
-      if (newRole && typeof newRole === 'string') target.role = newRole as any;
-      if (newStatus && typeof newStatus === 'string') target.status = newStatus as any;
-      if (specialization !== undefined) target.specialization = specialization;
-      if (newPassword && typeof newPassword === 'string' && newPassword.length >= 6) {
-        const { hashPassword } = await import('@/lib/auth/password');
-        target.passwordHash = hashPassword(newPassword);
-      }
-
-      const { upsertServerUser } = await import('@/lib/auth/user-store');
-      upsertServerUser(target);
-
-      try {
-        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
-        await syncUserToFirestore({
-          id: target.id,
-          name: target.name,
-          email: target.email,
-          mobile: target.mobile,
-          role: target.role,
-          status: target.status,
-          branch: target.branch,
-          specialization: target.specialization,
-          specializations: target.specializations,
-          startMonthYear: target.startMonthYear,
-          startDate: target.startDate,
-          endDate: target.endDate,
-          passwordHash: target.passwordHash,
-          createdAt: target.createdAt
+        transaction.create(jobRef, { id: jobRef.id, type: 'staff.upsert', entityId: uid, branchId, state: 'pending', attempts: 0, createdAt: now });
+        transaction.create(auditRef, {
+          id: auditId, timestamp: now, createdAt: now,
+          userId: session.user.id, userName: session.user.name, role: session.user.role,
+          action: `USER_${String(input.action).toUpperCase()}`, module: 'STAFF', recordId: target.id, branch,
+          newValue: JSON.stringify({ role: nextRole, status: nextStatus, branch }),
         });
-      } catch (fsErr) {
-        console.warn('[Users/edit_staff] Firestore sync note:', fsErr);
-      }
-
-      try {
-        const branchCode = BRANCH_NAME_TO_CODE[target.branch];
-        const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
-        if (spreadsheetId) {
-          const { upsertStaffDirectory, createStaffSubsheets } = await import('@/lib/sheets/sheets-service');
-          await upsertStaffDirectory(spreadsheetId, {
-            staffId: target.id,
-            fullName: target.name,
-            role: target.role,
-            designation: target.specialization || target.role,
-            department: 'Operations',
-            email: target.email,
-            mobile: target.mobile,
-            joiningDate: target.startDate || new Date().toISOString().split('T')[0],
-            reportingManager: 'Management',
-            accountStatus: target.status === 'active' ? 'Active' : target.status === 'rejected' ? 'Rejected' : 'Pending',
-            firebaseUid: target.id
-          });
-
-          if (target.status === 'active') {
-            await createStaffSubsheets(spreadsheetId, target.id, target.name, target.role);
-          }
-        }
-      } catch (sheetErr) {
-        console.warn('[Users/edit_staff] Sheet sync note:', sheetErr);
-      }
-
-      return NextResponse.json({
-        success: true,
-        user: stripSensitive(target)
+        transaction.create(auditProjectionRef, { id: auditProjectionRef.id, type: 'audit.project', entityId: auditId, branchId, state: 'pending', attempts: 0, createdAt: now });
       });
+    } catch (error) {
+      if (Object.keys(authUpdates).length) {
+        await auth.updateUser(uid, {
+          email: authBefore.email || undefined,
+          phoneNumber: authBefore.phoneNumber || null,
+          disabled: authBefore.disabled,
+        }).catch(rollbackError => console.error('[AuthUsers] Firebase Auth compensation failed.', rollbackError));
+      }
+      throw error;
     }
-
-    // Enforce branch isolation for Admin
-    if (!canManageTargetUser(session.user, target)) {
-      return NextResponse.json(
-        { error: `Forbidden: You can only manage personnel within your branch (${session.user.branch})` },
-        { status: 403 }
-      );
-    }
-
-    if (action === 'update_status' && status) {
-      const updated = updateUserStatus(userId, status, target);
-
-      // 1. Dual persistence: Sync to Firebase Firestore
-      try {
-        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
-        await syncUserToFirestore({
-          id: updated.id,
-          name: updated.name,
-          email: updated.email,
-          mobile: updated.mobile,
-          role: updated.role,
-          status: updated.status,
-          branch: updated.branch,
-          specialization: updated.specialization,
-          specializations: updated.specializations,
-          startMonthYear: updated.startMonthYear,
-          startDate: updated.startDate,
-          endDate: updated.endDate,
-          passwordHash: updated.passwordHash || (target as any).password || (target as any).passwordHash,
-          createdAt: updated.createdAt
-        });
-      } catch (fsErr) {
-        console.warn('[Users/PATCH] Firestore sync note:', fsErr);
-      }
-
-      // 2. Dual persistence: Sync to Google Sheets and auto-create 4 subsheets if approved
-      try {
-        const branchCode = BRANCH_NAME_TO_CODE[updated.branch];
-        const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
-        if (spreadsheetId) {
-          const { upsertStaffDirectory, createStaffSubsheets } = await import('@/lib/sheets/sheets-service');
-          await upsertStaffDirectory(spreadsheetId, {
-            staffId: updated.id,
-            fullName: updated.name,
-            role: updated.role,
-            designation: updated.specialization || updated.role,
-            department: 'Operations',
-            email: updated.email,
-            mobile: updated.mobile,
-            joiningDate: updated.startDate || new Date().toISOString().split('T')[0],
-            reportingManager: 'Management',
-            accountStatus: status === 'active' ? 'Active' : status === 'rejected' ? 'Rejected' : 'Pending',
-            firebaseUid: updated.id
-          });
-
-          // Create the 4 allocated subsheets (WL_<ID>, STU_<ID>, TSK_<ID>, ATT_<ID>) on branch sheet
-          if (status === 'active') {
-            await createStaffSubsheets(spreadsheetId, updated.id, updated.name, updated.role);
-          }
-        }
-      } catch (sheetErr) {
-        console.warn('[Users/PATCH] Google Sheets sync note:', sheetErr);
-      }
-
-      // Enterprise Audit Logging
-      try {
-        const { logAuditEvent } = await import('@/lib/audit/audit-service');
-        await logAuditEvent({
-          userId: session.user.id,
-          userName: session.user.name,
-          role: session.user.role,
-          action: status === 'active' ? 'USER_APPROVED' : status === 'rejected' ? 'USER_REJECTED' : 'USER_STATUS_UPDATED',
-          module: 'STAFF',
-          recordId: updated.id,
-          branch: updated.branch,
-          oldValue: target.status,
-          newValue: status,
-          ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
-        });
-      } catch (auditErr) {
-        console.warn('[Users/PATCH] Non-blocking audit log warning:', auditErr);
-      }
-
-      return NextResponse.json({ success: true, user: stripSensitive(updated) });
-    }
-
-    if (action === 'update_role' && role) {
-      // ONLY Super Admin can edit staff roles
-      if (session.user.role !== 'superadmin') {
-        return NextResponse.json(
-          { error: 'Forbidden: Only Super Admin is authorized to edit staff roles' },
-          { status: 403 }
-        );
-      }
-
-      const updated = updateUserRole(userId, role, target);
-
-      // Sync updated role to Firestore
-      try {
-        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
-        await syncUserToFirestore({
-          id: updated.id,
-          name: updated.name,
-          email: updated.email,
-          mobile: updated.mobile,
-          role: updated.role,
-          status: updated.status,
-          branch: updated.branch,
-          specialization: updated.specialization,
-          specializations: updated.specializations,
-          startMonthYear: updated.startMonthYear,
-          startDate: updated.startDate,
-          endDate: updated.endDate,
-          passwordHash: updated.passwordHash || (target as any).password || (target as any).passwordHash,
-          createdAt: updated.createdAt
-        });
-      } catch (fsErr) {
-        console.warn('[Users/PATCH] Role Firestore sync note:', fsErr);
-      }
-
-      return NextResponse.json({ success: true, user: stripSensitive(updated) });
-    }
-
-    if (action === 'delete') {
-      if (!canDeleteUser(session.user, target)) {
-        if (target.role === 'superadmin') {
-          return NextResponse.json(
-            { error: 'Super Admin accounts cannot be deleted by anyone' },
-            { status: 403 }
-          );
-        }
-        if (target.role === 'admin' || target.role === 'hr') {
-          return NextResponse.json(
-            { error: 'Only Super Admin has permission to delete Admin and HR accounts' },
-            { status: 403 }
-          );
-        }
-        return NextResponse.json(
-          { error: 'Forbidden: You do not have permission to delete this user' },
-          { status: 403 }
-        );
-      }
-      const deleted = deleteUser(userId);
-
-      // Clean up Firestore doc completely (by ID, email, gmail, mobile)
-      try {
-        const { deleteUserFromFirestore } = await import('@/lib/firebase/firebase-admin');
-        await deleteUserFromFirestore(userId, target.email, target.mobile);
-      } catch (fsErr) {
-        console.warn('[Users/DELETE] Firestore doc delete note:', fsErr);
-      }
-
-      // Clean up Google Sheets subsheets
-      try {
-        const branchCode = BRANCH_NAME_TO_CODE[target.branch];
-        const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
-        if (spreadsheetId) {
-          const { deleteStaffSubsheets } = await import('@/lib/sheets/sheets-service');
-          await deleteStaffSubsheets(spreadsheetId, target.id);
-        }
-      } catch (sheetErr) {
-        console.warn('[Users/DELETE] Subsheet delete note:', sheetErr);
-      }
-
-      return NextResponse.json({ success: deleted });
-    }
-
-    return NextResponse.json({ error: 'Invalid action requested' }, { status: 400 });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Operation failed';
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return NextResponse.json({ success: true, user: { ...target, ...updates, role: nextRole, status: nextStatus } });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'USER_NOT_FOUND') return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+    if (error instanceof Error && error.message === 'PHONE_IN_USE') return NextResponse.json({ error: 'That mobile number is already assigned to an account.' }, { status: 409 });
+    return NextResponse.json({ error: 'User update could not be completed.' }, { status: 503 });
   }
 }

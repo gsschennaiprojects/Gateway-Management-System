@@ -49,7 +49,7 @@ export function AccountInfoRow({
   const [localToggle, setLocalToggle] = useState(toggleValue);
 
   useEffect(() => {
-    setLocalToggle(toggleValue);
+    queueMicrotask(() => setLocalToggle(toggleValue));
   }, [toggleValue]);
 
   const isClickable = (action === 'arrow' || action === 'toggle' || Boolean(onClick)) && !disabled;

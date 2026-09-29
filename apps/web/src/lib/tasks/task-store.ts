@@ -1,11 +1,11 @@
 import { AssignedTask, TaskNotification, TaskPriority, TaskStatus, TaskGroupTarget } from '@/types/task';
-import { UserRole, Branch } from '@/types/auth';
+import { UserRole } from '@/types/auth';
 import { getAllUsers } from '@/lib/auth/user-store';
 
 // Runtime in-memory stores for server handlers
-let serverTasks: AssignedTask[] = [];
+const serverTasks: AssignedTask[] = [];
 
-let serverNotifications: TaskNotification[] = [];
+const serverNotifications: TaskNotification[] = [];
 
 export function getAllTasks(): AssignedTask[] {
   return serverTasks;

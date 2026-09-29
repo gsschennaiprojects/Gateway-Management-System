@@ -10,15 +10,16 @@ export interface Student {
   domain: string;
   branch: Branch;
   mentorName: string;
+  mentorStaffId?: string;
   mentorRole: string;
-  feeStatus: 'paid' | 'partial' | 'pending';
+  feeStatus: 'paid' | 'partial' | 'pending' | 'unknown';
   startDate: string; // Format: YYYY-MM-DD (e.g. 2026-07-01)
   endDate: string;   // Format: YYYY-MM-DD (e.g. 2026-09-30)
   duration: string;  // e.g. "3 Months"
   projectTitle: string;
-  projectCompleted: boolean;
-  todayStatus: 'present' | 'absent' | 'holiday';
-  yesterdayTaskDone: boolean;
+  projectCompleted: boolean | null;
+  todayStatus: 'present' | 'absent' | 'holiday' | 'unknown';
+  yesterdayTaskDone: boolean | null;
   // Day-by-day attendance for calendar days (1..30)
   dailyAttendance: Record<number, 'present' | 'absent' | 'holiday'>;
   // Day-by-day task deliverables (1..30)

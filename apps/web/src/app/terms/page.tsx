@@ -3,13 +3,11 @@
 import React from 'react';
 import Link from 'next/link';
 import {
-  FileText,
   ShieldCheck,
   Scale,
   AlertOctagon,
   ArrowLeft,
   Building,
-  CheckCircle2,
 } from 'lucide-react';
 
 export default function TermsOfServicePage() {

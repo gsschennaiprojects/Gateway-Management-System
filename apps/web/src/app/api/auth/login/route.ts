@@ -1,124 +1,133 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findUserByIdentifier, stripSensitive } from '@/lib/auth/user-store';
+import { getFirestoreUserByIdentifier } from '@/lib/firebase/firebase-admin';
 import { setSessionCookie } from '@/lib/auth/session';
-import { hashPassword, verifyPassword } from '@/lib/auth/password';
+import { checkLoginRateLimit } from '@/lib/auth/login-rate-limit';
+import { verifyPassword, hashPassword } from '@/lib/auth/password';
+import type { User } from '@/types/auth';
 
 export const dynamic = 'force-dynamic';
+const INVALID_CREDENTIALS = 'Invalid email/mobile or password.';
 
-export async function POST(req: NextRequest) {
+function hasValidOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return false;
+  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl && process.env.NODE_ENV === 'production') return false;
+  const configuredOrigin = appUrl ? new URL(appUrl).origin : new URL(request.url).origin;
+  return origin === configuredOrigin;
+}
+
+export async function POST(request: NextRequest) {
+  if (!hasValidOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (Number(request.headers.get('content-length') || 0) > 16_384) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+
   try {
-    const body = await req.json();
-    const { identifier, password } = body;
-
-    if (!identifier || typeof identifier !== 'string') {
-      return NextResponse.json(
-        { error: 'Please enter your Gmail address or 10-digit Mobile number' },
-        { status: 400 }
-      );
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') return NextResponse.json({ error: INVALID_CREDENTIALS }, { status: 401 });
+    const { identifier, password } = body as { identifier?: unknown; password?: unknown };
+    if (typeof identifier !== 'string' || identifier.trim().length < 3 || identifier.length > 254 ||
+        typeof password !== 'string' || password.length < 1 || password.length > 1024) {
+      return NextResponse.json({ error: INVALID_CREDENTIALS }, { status: 401 });
     }
 
-    // 1. Authoritative lookup from Cloud Firestore users collection first
-    let user: any = null;
-    try {
-      const { getFirestoreUserByIdentifier } = await import('@/lib/firebase/firebase-admin');
-      user = await getFirestoreUserByIdentifier(identifier);
-    } catch (fsErr) {
-      console.warn('[Login] Firestore lookup note:', fsErr);
+    const forwarded = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
+    const clientAddress = forwarded.split(',')[0].trim().slice(0, 100) || 'unknown';
+    if (!await checkLoginRateLimit(identifier, clientAddress)) {
+      return NextResponse.json({ error: INVALID_CREDENTIALS }, { status: 429, headers: { 'Retry-After': '900' } });
     }
 
-    // 2. Fallback to in-memory store if Firestore is offline
-    if (!user) {
-      user = findUserByIdentifier(identifier);
-    } else {
-      // Keep in-memory store warm with the authoritative Firestore record
-      const { upsertServerUser } = await import('@/lib/auth/user-store');
-      upsertServerUser(user);
+    // 1. Authoritative lookup from Cloud Firestore users collection
+    let profile = await getFirestoreUserByIdentifier(identifier.trim());
+
+    // 2. Fallback to in-memory user-store if Firestore is unreachable
+    if (!profile) {
+      const { findUserByIdentifier } = await import('@/lib/auth/user-store');
+      profile = findUserByIdentifier(identifier.trim()) as any;
     }
 
-    if (!user) {
-      return NextResponse.json(
-        { error: 'No account found matching this Gmail or Mobile number' },
-        { status: 401 }
-      );
+    if (!profile || !profile.email) {
+      return NextResponse.json({ error: INVALID_CREDENTIALS }, { status: 401 });
     }
 
-    if (user.status !== 'active') {
-      return NextResponse.json(
-        { error: user.status === 'pending' ? 'Your account is awaiting approval.' : 'This account is not active.' },
-        { status: 403 }
-      );
+    if (profile.status === 'disabled' || profile.status === 'rejected') {
+      return NextResponse.json({ error: 'This account is not active.' }, { status: 403 });
     }
 
-    // Resolve password hash or stored password
-    const storedHash = user.passwordHash || user.password;
-    if (typeof password !== 'string' || password.length === 0 || !storedHash) {
-      return NextResponse.json(
-        { error: 'Invalid password. Please verify your password and try again.' },
-        { status: 401 }
-      );
+    // 3. Verify password
+    let check = { valid: false, needsUpgrade: false };
+    if (profile.passwordHash) {
+      check = verifyPassword(password, profile.passwordHash);
+    }
+    if (!check.valid && (profile as any).password) {
+      check = verifyPassword(password, (profile as any).password);
     }
 
-    let passwordCheck = storedHash ? verifyPassword(password, storedHash) : { valid: false, needsUpgrade: false };
-    
-    if (!passwordCheck.valid) {
-      return NextResponse.json(
-        { error: 'Invalid password. Please verify your password and try again.' },
-        { status: 401 }
-      );
+    if (!check.valid) {
+      return NextResponse.json({ error: INVALID_CREDENTIALS }, { status: 401 });
     }
 
-    if (passwordCheck.needsUpgrade) {
-      const passwordHash = hashPassword(password);
-      const upgradedUser = { ...user, passwordHash };
-      const { upsertServerUser } = await import('@/lib/auth/user-store');
-      upsertServerUser(upgradedUser);
-      const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
-      await syncUserToFirestore({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        mobile: user.mobile,
-        role: user.role,
-        status: user.status,
-        branch: user.branch,
-        passwordHash,
-        createdAt: user.createdAt,
-      });
-      user = upgradedUser;
+    // 4. Upgrade plain-text password to scrypt hash seamlessly
+    if (check.needsUpgrade) {
+      try {
+        const newHash = hashPassword(password);
+        const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
+        await syncUserToFirestore({
+          id: profile.id,
+          name: profile.name,
+          email: profile.email,
+          mobile: profile.mobile,
+          role: profile.role,
+          status: profile.status,
+          branch: profile.branch,
+          passwordHash: newHash,
+          createdAt: profile.createdAt,
+        });
+      } catch (upgradeErr) {
+        console.warn('[Login] Password auto-upgrade warning:', upgradeErr);
+      }
     }
 
-    const safeUser = stripSensitive(user);
+    // 5. Construct safe user profile without credentials
+    const safeUser: User = {
+      id: profile.id,
+      uid: profile.uid || profile.id,
+      name: profile.name,
+      email: profile.email,
+      mobile: profile.mobile,
+      role: profile.role,
+      status: profile.status,
+      branch: profile.branch,
+      specialization: profile.specialization,
+      specializations: profile.specializations,
+      majorSpecialization: profile.majorSpecialization,
+      additionalSpecializations: profile.additionalSpecializations,
+      startMonthYear: profile.startMonthYear,
+      startDate: profile.startDate,
+      endDate: profile.endDate,
+      createdAt: profile.createdAt,
+    };
+
+    // 6. Set signed session cookie
     await setSessionCookie(safeUser);
 
-    // Web authentication completed. Attendance is initiated explicitly by staff via the Punch In button.
+    // 7. Non-blocking audit log
+    import('@/lib/audit/audit-service').then(({ logAuditEvent }) => {
+      logAuditEvent({
+        userId: safeUser.id,
+        userName: safeUser.name,
+        role: safeUser.role,
+        action: 'AUTH_LOGIN',
+        module: 'AUTH',
+        recordId: safeUser.id,
+        branch: safeUser.branch,
+        newValue: 'Logged In',
+        ipAddress: clientAddress,
+      }).catch(() => {});
+    }).catch(() => {});
 
-    // Enterprise Audit Logging (Non-blocking: executed in background so login completes in <10ms)
-    import('@/lib/audit/audit-service')
-      .then(({ logAuditEvent }) => {
-        logAuditEvent({
-          userId: safeUser.id,
-          userName: safeUser.name,
-          role: safeUser.role,
-          action: 'AUTH_LOGIN',
-          module: 'AUTH',
-          recordId: safeUser.id,
-          branch: safeUser.branch,
-          newValue: 'Present (Auto-Marked)',
-          ipAddress: req.headers.get('x-forwarded-for') || '127.0.0.1'
-        }).catch((auditErr) => {
-          console.warn('[Login] Non-blocking audit log warning:', auditErr?.message || auditErr);
-        });
-      })
-      .catch((importErr) => {
-        console.warn('[Login] Non-blocking audit import warning:', importErr?.message || importErr);
-      });
-
-    return NextResponse.json({
-      success: true,
-      user: safeUser,
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Authentication failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ success: true, user: safeUser });
+  } catch (error) {
+    console.error('[Login] Unexpected error during authentication:', error);
+    return NextResponse.json({ error: 'Authentication service is unavailable.' }, { status: 503 });
   }
 }

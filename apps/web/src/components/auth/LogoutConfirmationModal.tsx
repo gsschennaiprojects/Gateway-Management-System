@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { AccountAvatar } from '@/components/account/AccountAvatar';
-import { LogOut, ShieldAlert, X, AlertTriangle, MapPin, Loader2 } from 'lucide-react';
+import { LogOut, X, AlertTriangle, MapPin, Loader2 } from 'lucide-react';
 
 export function LogoutConfirmationModal() {
   const { user, isLogoutModalOpen, cancelLogout, confirmLogout, isLoggingOut } = useAuth();

@@ -12,22 +12,16 @@ import Link from 'next/link';
 import {
   LogIn,
   LogOut,
-  Plus,
-  Trash2,
   CheckCircle2,
   Clock,
   GraduationCap,
-  Briefcase,
-  CalendarCheck,
   Check,
   X,
-  Coffee,
   CheckSquare,
   Users,
   ArrowRight,
   Calendar,
   Timer,
-  Sparkles,
   AlertCircle,
 } from 'lucide-react';
 import { formatStudentDate } from '@/types/student';
@@ -84,17 +78,14 @@ export default function EmployeeDashboardPage() {
     liveDate,
     loginTime,
     logoutTime,
-    isPunchedIn,
     isPunchedOut,
     plannedTasks,
     setPlannedTasks,
     completedTasks,
     setCompletedTasks,
-    totalHours,
     workingCalc,
     elapsedTime,
     punchIn,
-    punchOut,
     isPunchOutModalOpen,
     requestPunchOut,
     cancelPunchOut,
@@ -552,7 +543,7 @@ export default function EmployeeDashboardPage() {
                 <th className="py-3.5 px-4 text-center">
                   Today&apos;s Mark ({liveDate.shortDay}, {liveDate.formattedDate})
                 </th>
-                <th className="py-3.5 px-4 text-center">Yesterday's Task</th>
+                <th className="py-3.5 px-4 text-center">Yesterday&apos;s Task</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-subtle,#F1F3F4)] text-sm bg-[var(--bg-card,#FFFFFF)]">
@@ -676,4 +667,3 @@ export default function EmployeeDashboardPage() {
     </div>
   );
 }
-

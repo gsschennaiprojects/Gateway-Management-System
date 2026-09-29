@@ -6,20 +6,17 @@ import { BrandLogo } from '@/components/ui/BrandLogo';
 import { AccountCard } from '@/components/account/AccountCard';
 import { AccountInfoRow } from '@/components/account/AccountInfoRow';
 import {
-  Info,
   MapPin,
   Code2,
   FileText,
   Shield,
   Heart,
-  ExternalLink,
   Package,
   Globe,
   Building2,
   Mail,
   Phone,
   X,
-  CheckCircle2,
 } from 'lucide-react';
 
 export default function AboutPage() {

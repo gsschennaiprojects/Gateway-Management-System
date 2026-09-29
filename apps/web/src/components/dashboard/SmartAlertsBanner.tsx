@@ -3,7 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
-import { AlertCircle, Clock, UserCheck, ArrowRight, X, Sparkles } from 'lucide-react';
+import type { User } from '@/types/auth';
+import type { AssignedTask } from '@/types/task';
+import { AlertCircle, UserCheck, ArrowRight, X } from 'lucide-react';
 
 interface OperationalAlert {
   id: string;
@@ -31,7 +33,7 @@ export function SmartAlertsBanner() {
           const res = await fetch('/api/auth/users');
           if (res.ok) {
             const data = await res.json();
-            const users = (data.users || data || []) as any[];
+            const users = (data.users || data || []) as User[];
             const pendingCount = users.filter((u) => u.status === 'pending').length;
             if (pendingCount > 0) {
               generatedAlerts.push({
@@ -50,7 +52,7 @@ export function SmartAlertsBanner() {
         const resTasks = await fetch('/api/tasks');
         if (resTasks.ok) {
           const taskData = await resTasks.json();
-          const tasks = (taskData.tasks || taskData || []) as any[];
+          const tasks = (taskData.tasks || taskData || []) as AssignedTask[];
           const todayStr = new Date().toISOString().slice(0, 10);
           
           const overdueTasks = tasks.filter(

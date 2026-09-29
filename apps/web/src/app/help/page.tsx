@@ -3,9 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import {
-  HelpCircle,
   Search,
-  BookOpen,
   CalendarCheck,
   GraduationCap,
   FileSpreadsheet,
@@ -17,9 +15,7 @@ import {
   MapPin,
   ArrowLeft,
   LifeBuoy,
-  Clock,
   Sparkles,
-  ExternalLink,
 } from 'lucide-react';
 
 interface FaqItem {

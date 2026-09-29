@@ -5,13 +5,9 @@ import Link from 'next/link';
 import {
   Shield,
   Lock,
-  Eye,
   FileCheck,
   Server,
   ArrowLeft,
-  Calendar,
-  Building,
-  CheckCircle2,
 } from 'lucide-react';
 
 export default function PrivacyPolicyPage() {

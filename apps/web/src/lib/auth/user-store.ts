@@ -143,7 +143,7 @@ export function deleteUser(userId: string): boolean {
   return true;
 }
 
-export function stripSensitive(user: StoredUser): User {
+export function stripSensitive(user: User & { passwordHash?: string; password?: string }): User {
   const safeUser = { ...user } as Record<string, unknown>;
   delete safeUser.passwordHash;
   delete safeUser.password;

@@ -1,5 +1,5 @@
 export type UserRole = 'superadmin' | 'admin' | 'hr' | 'employee' | 'intern';
-export type UserStatus = 'active' | 'pending' | 'rejected';
+export type UserStatus = 'active' | 'pending' | 'rejected' | 'disabled';
 export type Branch = 'Coimbatore' | 'Chennai' | 'Madurai' | 'Erode';
 
 export const BRANCHES: Branch[] = ['Coimbatore', 'Chennai', 'Madurai', 'Erode'];
@@ -23,6 +23,7 @@ export type Specialization = string;
 
 export interface User {
   id: string;
+  uid?: string;
   name: string;
   email: string;
   mobile: string;
@@ -42,7 +43,7 @@ export interface User {
 
 export interface AuthSession {
   user: User;
-  token: string;
+  uid: string;
   expiresAt: number;
 }
 

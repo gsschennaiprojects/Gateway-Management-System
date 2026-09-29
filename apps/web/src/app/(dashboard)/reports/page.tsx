@@ -2,21 +2,16 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { StatusChip } from '@/components/ui/StatusChip';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { useAuth } from '@/context/AuthContext';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
 import {
   FileSpreadsheet,
-  Download,
   FileText,
-  Calendar,
   CheckCircle2,
   GraduationCap,
-  Clock,
   Printer,
   Loader2,
-  Sparkles,
 } from 'lucide-react';
 
 export default function MonthlyReportPage() {

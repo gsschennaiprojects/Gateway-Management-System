@@ -2,20 +2,17 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { StatusChip } from '@/components/ui/StatusChip';
 import { Input } from '@/components/ui/Input';
 import {
   MailCheck,
   UploadCloud,
   FileSpreadsheet,
   CheckCircle2,
-  AlertCircle,
   Mail,
   Key,
   Send,
   Filter,
   Search,
-  Check,
   FileText,
   Loader2,
   Printer,
@@ -47,7 +44,6 @@ export default function LeadsDashboardPage() {
   const [emailAddress, setEmailAddress] = useState('hr.leads@gss.com');
   const [appPassword, setAppPassword] = useState('');
   const [isTestingEmail, setIsTestingEmail] = useState(false);
-  const [testEmailSuccess, setTestEmailSuccess] = useState(false);
 
   const simulateUpload = () => {
     setUploadSummary({
@@ -60,7 +56,6 @@ export default function LeadsDashboardPage() {
     setIsTestingEmail(true);
     setTimeout(() => {
       setIsTestingEmail(false);
-      setTestEmailSuccess(true);
       setIsEmailConnected(true);
     }, 1200);
   };
@@ -211,7 +206,7 @@ export default function LeadsDashboardPage() {
             Candidate Intake Upload
           </h2>
           <p className="text-xs text-[var(--text-secondary)] mb-4">
-            Upload CSV/XLSX leads file — we'll check for duplicates by Gmail + Mobile automatically.
+            Upload CSV/XLSX leads file — we&apos;ll check for duplicates by Gmail + Mobile automatically.
           </p>
 
           <div
@@ -261,7 +256,7 @@ export default function LeadsDashboardPage() {
             )}
           </div>
           <p className="text-xs text-[var(--text-secondary)] mb-4">
-            An App Password lets GSS send email as you over SMTP — it's not your normal password.
+            An App Password lets GSS send email as you over SMTP — it&apos;s not your normal password.
           </p>
 
           <div className="space-y-3.5">

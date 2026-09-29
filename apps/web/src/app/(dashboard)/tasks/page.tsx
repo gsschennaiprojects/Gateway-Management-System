@@ -3,10 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/StatusChip';
-import { Input } from '@/components/ui/Input';
 import { useAuth } from '@/context/AuthContext';
 import { AssignedTask, TaskPriority, TaskStatus, TaskTargetType } from '@/types/task';
-import { User, UserRole, Branch, BRANCHES, DEFAULT_DOMAINS } from '@/types/auth';
+import { User, UserRole, BRANCHES } from '@/types/auth';
 import { canAssignTasks } from '@/lib/rbac/permissions';
 import {
   CheckSquare,
@@ -16,14 +15,9 @@ import {
   Clock,
   Calendar,
   AlertCircle,
-  CheckCircle2,
-  Filter,
   Search,
-  ArrowRight,
   Sparkles,
   X,
-  Shield,
-  Layers,
   Check,
   FileSpreadsheet,
   FileText,
@@ -36,7 +30,7 @@ export default function TasksManagementPage() {
   const { user: currentUser } = useAuth();
   const [tasks, setTasks] = useState<AssignedTask[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -49,7 +43,7 @@ export default function TasksManagementPage() {
   const [groupName, setGroupName] = useState('All Interns - ' + (currentUser?.branch || 'Coimbatore'));
   const [groupRole, setGroupRole] = useState<UserRole>('intern');
   const [groupBranch, setGroupBranch] = useState<string>(currentUser?.branch || 'Coimbatore');
-  const [groupDomain, setGroupDomain] = useState<string>('');
+  const groupDomain = '';
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [dueDate, setDueDate] = useState('2026-09-18');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -148,10 +142,10 @@ export default function TasksManagementPage() {
   };
 
   useEffect(() => {
-    fetchTasks();
-    if (canCreate) {
-      fetchUsers();
-    }
+    void Promise.resolve().then(() => {
+      fetchTasks();
+      if (canCreate) fetchUsers();
+    });
   }, [currentUser, canCreate]);
 
   // Eligible individual targets: HR, Employee, Intern
@@ -220,10 +214,18 @@ export default function TasksManagementPage() {
 
   const handleUpdateStatus = async (taskId: string, newStatus: TaskStatus) => {
     try {
+      const reason = newStatus === 'partially_stopped'
+        ? window.prompt('Describe why this task was partially stopped (at least 10 characters):')?.trim() || ''
+        : undefined;
+      if (newStatus === 'partially_stopped' && reason && reason.length < 10) {
+        setFormError('Please enter at least 10 characters for the stop reason.');
+        return;
+      }
+      if (newStatus === 'partially_stopped' && !reason) return;
       const res = await fetch('/api/tasks', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, status: newStatus })
+        body: JSON.stringify({ taskId, status: newStatus, reason })
       });
       if (res.ok) {
         setTasks((prev) =>
@@ -513,6 +515,14 @@ export default function TasksManagementPage() {
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>Mark Done</span>
+                      </button>
+                    )}
+                    {task.status === 'in_progress' && (
+                      <button
+                        onClick={() => handleUpdateStatus(task.id, 'partially_stopped')}
+                        className="px-3 py-1.5 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium text-xs transition-colors cursor-pointer"
+                      >
+                        Partially stopped
                       </button>
                     )}
                     {task.status === 'completed' && (

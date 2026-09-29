@@ -20,6 +20,14 @@ interface AuthContextType {
   refreshSession: () => Promise<void>;
 }
 
+interface AuthApiResponse {
+  success?: boolean;
+  user?: User;
+  error?: string;
+  alreadyExists?: boolean;
+  email?: string;
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -50,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refreshSession();
+    void Promise.resolve().then(refreshSession);
   }, [refreshSession]);
 
   const login = async (credentials: LoginCredentials) => {
@@ -61,10 +69,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify(credentials)
       });
 
-      let data: any = {};
+      let data: AuthApiResponse = {};
       try {
         const text = await res.text();
-        data = text ? JSON.parse(text) : {};
+        data = text ? JSON.parse(text) as AuthApiResponse : {};
       } catch {
         data = { error: `Server returned an invalid response (${res.status})` };
       }
@@ -72,6 +80,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!res.ok) {
         return { success: false, error: data.error || `Failed to sign in (${res.status})` };
       }
+
+      if (!data.user) return { success: false, error: 'Sign in response did not include a user.' };
 
       setUser(data.user);
 
@@ -91,7 +101,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             router.push('/leads');
             break;
           case 'employee':
-          case 'trainer':
           default:
             router.push('/dashboard');
             break;
@@ -113,10 +122,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify(payload)
       });
 
-      let data: any = {};
+      let data: AuthApiResponse = {};
       try {
         const text = await res.text();
-        data = text ? JSON.parse(text) : {};
+        data = text ? JSON.parse(text) as AuthApiResponse : {};
       } catch {
         data = { error: `Server returned an invalid response (${res.status})` };
       }
@@ -129,6 +138,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: data.email
         };
       }
+
+      if (!data.user) return { success: false, error: 'Registration response did not include a user.' };
 
       setUser(data.user);
 

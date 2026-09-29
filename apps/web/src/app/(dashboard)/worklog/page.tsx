@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 import { TaskPointInput } from '@/components/worklog/TaskPointInput';
 import { PunchOutConfirmationModal } from '@/components/worklog/PunchOutConfirmationModal';
 import { useDailySession } from '@/lib/worklogs/useDailySession';
@@ -20,7 +19,6 @@ import {
   FileText,
   Printer,
   Sparkles,
-  Zap,
   Timer,
   Check,
 } from 'lucide-react';
@@ -50,7 +48,6 @@ export default function WorklogPage() {
     setLoginTime,
     logoutTime,
     setLogoutTime,
-    isPunchedIn,
     isPunchedOut,
     plannedTasks,
     setPlannedTasks,
@@ -58,7 +55,6 @@ export default function WorklogPage() {
     setCompletedTasks,
     incompleteReason,
     setIncompleteReason,
-    totalHours,
     workingCalc,
     elapsedTime,
     punchIn,
@@ -74,26 +70,30 @@ export default function WorklogPage() {
   } = useDailySession();
 
   const staffId = user?.id || '';
-  const branchCode = user?.branch ? BRANCH_NAME_TO_CODE[user.branch] : null;
-
   const fetchHistoryWorklogs = useCallback(async () => {
-    if (!staffId || !branchCode) return;
+    if (!staffId) return;
     setLoadingHistory(true);
     try {
-      const res = await fetch(`/api/sheets?type=worklog&staffId=${staffId}&branchCode=${branchCode}`);
+      const res = await fetch(`/api/worklogs?targetUserId=${encodeURIComponent(staffId)}`);
       const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setHistoryWorklogs(data.data);
+      if (res.ok && Array.isArray(data.logs)) {
+        setHistoryWorklogs(data.logs.map((log: Record<string, unknown>) => ({
+          logId: String(log.id || ''), date: String(log.date || ''),
+          loginTime: String(log.loginTime || ''), logoutTime: String(log.logoutTime || ''),
+          tasksCompleted: Array.isArray(log.completedTasks) ? log.completedTasks.join('; ') : '',
+          tasksPending: Array.isArray(log.plannedTasks) ? log.plannedTasks.join('; ') : '',
+          incompleteReason: String(log.incompleteReason || ''), totalHours: String(log.totalHours || ''), verifiedBy: 'Self',
+        })));
       }
     } catch (err) {
       console.warn('[WorklogPage] History fetch warning:', err);
     } finally {
       setLoadingHistory(false);
     }
-  }, [staffId, branchCode]);
+  }, [staffId]);
 
   useEffect(() => {
-    fetchHistoryWorklogs();
+    void Promise.resolve().then(fetchHistoryWorklogs);
   }, [fetchHistoryWorklogs]);
 
   const handleSaveAndRefresh = async () => {
@@ -628,4 +628,3 @@ export default function WorklogPage() {
     </div>
   );
 }
-

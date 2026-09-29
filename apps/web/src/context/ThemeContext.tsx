@@ -19,25 +19,9 @@ const ThemeContext = createContext<ThemeContextType>({
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<AppTheme>('light');
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('gss_theme') as AppTheme | null;
-      if (saved && ['light', 'dark', 'eye-care'].includes(saved)) {
-        setThemeState(saved);
-        applyTheme(saved);
-      } else {
-        applyTheme('light');
-      }
-    } catch {
-      applyTheme('light');
-    }
-  }, []);
-
-  const applyTheme = (t: AppTheme) => {
+  function applyTheme(t: AppTheme) {
     const root = document.documentElement;
     root.setAttribute('data-theme', t);
-
-    // Sync Tailwind & System dark mode classes
     if (t === 'dark') {
       root.classList.add('dark');
       root.classList.remove('eye-care');
@@ -51,7 +35,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       root.classList.remove('eye-care');
       root.style.colorScheme = 'light';
     }
-  };
+  }
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('gss_theme') as AppTheme | null;
+      if (saved && ['light', 'dark', 'eye-care'].includes(saved)) {
+        queueMicrotask(() => setThemeState(saved));
+        applyTheme(saved);
+      } else {
+        applyTheme('light');
+      }
+    } catch {
+      applyTheme('light');
+    }
+  }, []);
 
   const setTheme = (newTheme: AppTheme) => {
     setThemeState(newTheme);

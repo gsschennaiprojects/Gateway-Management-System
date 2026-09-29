@@ -1,11 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { useAuth } from '@/context/AuthContext';
-import { Clock, ShieldAlert, CheckCircle2, RotateCw, LogOut, ArrowRight } from 'lucide-react';
+import { Clock, RotateCw, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function PendingApprovalPage() {

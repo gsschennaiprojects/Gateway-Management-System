@@ -14,13 +14,6 @@ function onOpen() {
   ui.createMenu('🚀 GSS Enterprise Menu')
     .addItem('🏢 Initialize Common Branch Sheets', 'menuInitializeBranch')
     .addSeparator()
-    .addItem('👤 Approve Pending Person & Generate Sheets', 'menuApprovePerson')
-    .addItem('📋 Allocate Task (Multi-Employee)', 'menuCreateTask')
-    .addItem('🔄 Update Task Status (In-Place)', 'menuUpdateTaskStatus')
-    .addSeparator()
-    .addItem('⏰ Punch In (Login Timestamp)', 'menuPunchIn')
-    .addItem('🚪 Punch Out (Logout with Validation)', 'menuPunchOut')
-    .addSeparator()
     .addItem('📊 Refresh Branch Dashboard', 'menuRefreshDashboard')
     .addItem('⚙️ Setup Automated Daily Triggers', 'setupSystemTriggers')
     .addToUi();
@@ -60,6 +53,7 @@ function menuInitializeBranch() {
 
     // 07_Branch_Dashboard
     Dashboard.refreshDashboard(ss);
+    protectCanonicalProjectionSheets(ss);
 
     ui.alert(
       'Initialization Complete',
@@ -100,8 +94,7 @@ function initBranchDetailsSheet(ss) {
     Utils.setDropdownValidation(sheet, 13, ['Active', 'Inactive', 'Temporarily Closed']);
 
     // Pre-fill branch info by automatically detecting the current spreadsheet ID
-    const currentId = ss.getId();
-    const branchEntry = Object.values(GSS_CONFIG.BRANCHES).find(b => b.SPREADSHEET_ID === currentId) || GSS_CONFIG.BRANCHES.BRANCH_01;
+    const branchEntry = getCurrentBranchConfig();
 
     sheet.appendRow([
       branchEntry.ID,
@@ -148,8 +141,7 @@ function initBranchSettingsSheet(ss) {
 
   if (sheet.getLastRow() === 0) {
     Utils.formatHeaderRow(sheet, headers, GSS_CONFIG.UI_COLORS.PRIMARY_HEADER_BG);
-    const currentId = ss.getId();
-    const branchEntry = Object.values(GSS_CONFIG.BRANCHES).find(b => b.SPREADSHEET_ID === currentId) || GSS_CONFIG.BRANCHES.BRANCH_01;
+    const branchEntry = getCurrentBranchConfig();
 
     sheet.appendRow([
       branchEntry.ID,
@@ -309,8 +301,10 @@ function menuRefreshDashboard() {
  * 2. Hourly health check & dashboard refresh
  */
 function setupSystemTriggers() {
+  getCurrentBranchConfig();
   const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(t => ScriptApp.deleteTrigger(t));
+  triggers.filter(t => ['triggerDailyMorningProcess', 'triggerHourlyHealthCheck'].includes(t.getHandlerFunction()))
+    .forEach(t => ScriptApp.deleteTrigger(t));
 
   // Daily morning generation trigger
   ScriptApp.newTrigger('triggerDailyMorningProcess')
@@ -326,7 +320,7 @@ function setupSystemTriggers() {
     .everyHours(1)
     .create();
 
-  SpreadsheetApp.getUi().alert(
+  if (SpreadsheetApp.getUi) SpreadsheetApp.getUi().alert(
     'Triggers Configured',
     'Daily morning row generation (6:00 AM IST) and hourly KPI/overdue health checks have been successfully scheduled.',
     SpreadsheetApp.getUi().ButtonSet.OK
@@ -337,7 +331,6 @@ function setupSystemTriggers() {
  * Scheduled trigger function for morning preparation
  */
 function triggerDailyMorningProcess() {
-  Attendance.generateDailyWorkingRows();
   Dashboard.refreshDashboard();
 }
 
@@ -346,4 +339,32 @@ function triggerDailyMorningProcess() {
  */
 function triggerHourlyHealthCheck() {
   Dashboard.refreshDashboard();
+}
+
+/** Protect projected record sheets from manual edits while leaving trusted script writes operational. */
+function protectCanonicalProjectionSheets(ss = SpreadsheetApp.getActiveSpreadsheet()) {
+  const names = Object.values(GSS_CONFIG.SHEETS);
+  names.forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    const existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET)
+      .find(protection => protection.getDescription() === 'GSS canonical projection — app-managed');
+    if (existing) return;
+    const protection = sheet.protect().setDescription('GSS canonical projection — app-managed').setWarningOnly(false);
+    protection.setDomainEdit(false);
+    const currentUser = Session.getEffectiveUser();
+    if (currentUser && currentUser.getEmail()) {
+      const editors = protection.getEditors();
+      if (editors.length) protection.removeEditors(editors);
+      protection.addEditor(currentUser);
+    }
+  });
+}
+
+/** Idempotent branch setup entry point; preserves unrelated tabs and existing rows. */
+function provisionCurrentBranch() {
+  const branch = getCurrentBranchConfig();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  menuInitializeBranch();
+  return { branchId: branch.ID, branchCode: branch.CODE, spreadsheetId: ss.getId(), schemaVersion: GSS_CONFIG.VERSION };
 }

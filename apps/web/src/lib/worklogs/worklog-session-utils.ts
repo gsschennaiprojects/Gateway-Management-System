@@ -33,19 +33,21 @@ export interface WorkingTimeCalculation {
  */
 export function getLiveDateInfo(referenceDate?: Date): LiveDateInfo {
   const d = referenceDate || new Date();
-  
-  const yyyy = d.getFullYear();
-  const monthNum = d.getMonth() + 1;
-  const dayNum = d.getDate();
+  const timeZone = 'Asia/Kolkata';
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value || '';
+  const yyyy = Number(part('year'));
+  const monthNum = Number(part('month'));
+  const dayNum = Number(part('day'));
   const mm = String(monthNum).padStart(2, '0');
   const dd = String(dayNum).padStart(2, '0');
   
-  const dayOfWeek = d.toLocaleDateString('en-US', { weekday: 'long' });
-  const shortDay = d.toLocaleDateString('en-US', { weekday: 'short' });
-  const formattedDate = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  const fullDate = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  const monthName = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const currentTime = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const dayOfWeek = d.toLocaleDateString('en-US', { timeZone, weekday: 'long' });
+  const shortDay = d.toLocaleDateString('en-US', { timeZone, weekday: 'short' });
+  const formattedDate = d.toLocaleDateString('en-GB', { timeZone, day: '2-digit', month: 'short', year: 'numeric' });
+  const fullDate = d.toLocaleDateString('en-US', { timeZone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const monthName = d.toLocaleDateString('en-US', { timeZone, month: 'long', year: 'numeric' });
+  const currentTime = d.toLocaleTimeString('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hour12: true });
 
   return {
     isoDate: `${yyyy}-${mm}-${dd}`,

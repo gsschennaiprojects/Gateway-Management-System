@@ -1,5 +1,5 @@
 import { WorkLogEntry, StaffMonthlySummary } from '@/types/worklog';
-import { User, UserRole, Branch } from '@/types/auth';
+import { User, Branch } from '@/types/auth';
 import { getAllUsers, findUserById } from '@/lib/auth/user-store';
 
 // Runtime work logs store

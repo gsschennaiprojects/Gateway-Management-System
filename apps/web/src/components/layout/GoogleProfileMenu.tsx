@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { AccountAvatar } from '@/components/account/AccountAvatar';
-import { LogOut, Settings, UserCheck, Shield, ChevronRight, MapPin } from 'lucide-react';
+import { LogOut, Settings, MapPin } from 'lucide-react';
 
 export function GoogleProfileMenu() {
   const { user, logout } = useAuth();

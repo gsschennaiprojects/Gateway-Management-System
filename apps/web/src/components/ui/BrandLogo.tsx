@@ -8,8 +8,6 @@ interface BrandLogoProps {
   title?: string;
   subtitle?: string;
   className?: string;
-  glowOnHover?: boolean;
-  theme?: 'light' | 'dark' | 'eye-care';
 }
 
 const SIZE_MAP = {
@@ -28,8 +26,6 @@ export function BrandLogo({
   title = 'Gateway',
   subtitle = 'Software Solutions',
   className = '',
-  glowOnHover = false,
-  theme,
 }: BrandLogoProps) {
   const config = SIZE_MAP[size] || SIZE_MAP.md;
 

@@ -3,7 +3,6 @@
  * and data flow operations.
  */
 
-import { INITIAL_USERS } from '../src/lib/auth/mock-users.js';
 import { findUserByIdentifier, stripSensitive } from '../src/lib/auth/user-store.js';
 import { createSessionToken, parseSessionToken } from '../src/lib/auth/session.js';
 

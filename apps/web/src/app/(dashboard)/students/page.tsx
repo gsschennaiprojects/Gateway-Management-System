@@ -1,68 +1,44 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, Suspense } from 'react';
-import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { GlassPanel } from '@/components/ui/GlassPanel';
-import { StatusChip } from '@/components/ui/StatusChip';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { useAuth } from '@/context/AuthContext';
 import { Branch, BRANCHES, DEFAULT_DOMAINS } from '@/types/auth';
 import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 import {
   Student,
-  INITIAL_STUDENTS_DATA,
   calculateDuration,
-  formatStudentDate,
-  calculateTenureProgress
 } from '@/types/student';
 import {
   getWorkingDaysForMonth,
   formatHumanReadableDate,
-  isDateBefore,
-  isDateAfter,
   getStudentDateEnrollmentState,
-  type StudentTrackerItem,
   type AttendanceTrackerData,
 } from '@/lib/sheets/sheets-config';
+import type { BranchStudentRow } from '@/lib/sheets/sheets-service';
 import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
 import {
   GraduationCap,
   CalendarCheck,
   CheckCircle2,
   AlertCircle,
-  Clock,
   Plus,
   Search,
-  Filter,
-  Download,
   Save,
   Check,
   X,
-  Edit2,
-  Calendar,
   Sparkles,
   TrendingUp,
   Award,
-  BookOpen,
-  User,
-  ChevronRight,
-  ExternalLink,
   Printer,
   FileText,
   FileSpreadsheet,
-  ListTodo,
   Layers,
-  ArrowUpRight,
   RotateCw,
   Loader2,
   Table as TableIcon,
   UserCheck,
-  ChevronDown,
-  ChevronUp,
-  Mail,
-  Phone,
   ArrowRight,
   Users,
 } from 'lucide-react';
@@ -101,9 +77,8 @@ function StudentManagementContent() {
   );
 
   useEffect(() => {
-    if (tabParam === 'tracker') setActiveTab('tracker');
-    else if (tabParam === 'timeline' || tabParam === 'individual') setActiveTab('individual');
-    else if (tabParam === 'directory') setActiveTab('directory');
+    const tab = tabParam === 'tracker' ? 'tracker' : tabParam === 'timeline' || tabParam === 'individual' ? 'individual' : tabParam === 'directory' ? 'directory' : null;
+    if (tab) queueMicrotask(() => setActiveTab(tab));
   }, [tabParam]);
 
   const handleTabChange = (newTab: 'directory' | 'tracker' | 'individual' | 'analytics') => {
@@ -121,9 +96,11 @@ function StudentManagementContent() {
   // ─────────────────────────────────────────────────────────────────────────────
   // 1. DIRECTORY STATE & FETCH (06_Student_Directory)
   // ─────────────────────────────────────────────────────────────────────────────
-  const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS_DATA);
-  const [loadingDirectory, setLoadingDirectory] = useState(false);
-  const [directorySource, setDirectorySource] = useState<'sheets' | 'local'>('local');
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loadingDirectory, setLoadingDirectory] = useState(true);
+  const [studentSaving, setStudentSaving] = useState(false);
+  const [studentError, setStudentError] = useState<string | null>(null);
+  const [directorySource, setDirectorySource] = useState<'firestore' | 'unavailable'>('unavailable');
   const [searchQuery, setSearchQuery] = useState('');
   const [branchFilter, setBranchFilter] = useState<string>('all');
   const [domainFilter, setDomainFilter] = useState<string>('all');
@@ -132,57 +109,57 @@ function StudentManagementContent() {
   const fetchBranchStudentDirectory = useCallback(async () => {
     const cacheKey = `client:dir:${branchCode}`;
     const cached = clientSwrCache.get<Student[]>(cacheKey);
-    if (cached && cached.length > 0) {
+    if (cached) {
       setStudents(cached);
-      setDirectorySource('sheets');
+      setDirectorySource('firestore');
     }
 
     try {
       if (!cached) setLoadingDirectory(true);
       const res = await fetch(`/api/sheets?type=branch_student_directory&branchCode=${branchCode}`);
       const data = await res.json();
-      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-        const mapped: Student[] = data.data.map((r: any) => {
-          const durationStr = calculateDuration(r.admissionDate, r.endDate) || '3 Months';
+      if (res.ok && data.success && Array.isArray(data.data)) {
+        const mapped: Student[] = (data.data as BranchStudentRow[]).map((r) => {
+          const durationStr = calculateDuration(r.admissionDate, r.endDate);
           return {
             id: r.studentId,
             name: r.studentName,
             avatarUrl: undefined,
-            email: r.email || `${r.studentId.toLowerCase()}@student.guvi.in`,
-            mobile: r.mobile || '+91 98765 43210',
-            college: r.college || 'Engineering College',
-            domain: r.domain || 'Full Stack Web (MERN)',
-            branch: (currentUser?.branch as Branch) || 'Coimbatore',
-            mentorName: r.mentorName || 'Assigned Staff',
-            mentorRole: r.mentorStaffId ? `Mentor (${r.mentorStaffId})` : 'Staff Mentor',
-            feeStatus: (r.feeStatus?.toLowerCase() === 'paid' ? 'paid' : r.feeStatus?.toLowerCase() === 'partial' ? 'partial' : 'pending'),
+            email: r.email || '',
+            mobile: r.mobile || '',
+            college: r.college || '',
+            domain: r.domain || '',
+            branch: (r.branch || currentUser?.branch) as Branch,
+            mentorName: r.mentorName || '',
+            mentorStaffId: r.mentorStaffId || '',
+            mentorRole: '',
+            feeStatus: (r.feeStatus?.toLowerCase() === 'paid' ? 'paid' : r.feeStatus?.toLowerCase() === 'partial' ? 'partial' : r.feeStatus?.toLowerCase() === 'pending' ? 'pending' : 'unknown'),
             startDate: r.admissionDate,
             endDate: r.endDate,
             duration: durationStr,
-            projectTitle: `${r.domain} Capstone Milestone`,
-            projectCompleted: r.projectStatus === 'Completed',
-            todayStatus: 'present',
-            yesterdayTaskDone: true,
-            dailyAttendance: { 1: 'present', 2: 'present', 3: 'present', 4: 'present', 5: 'present' },
-            dailyTasks: {
-              1: { title: 'Project kick-off & requirements setup', completed: true },
-              2: { title: 'Architecture design and schema modeling', completed: true },
-            },
+            projectTitle: r.projectTitle || '',
+            projectCompleted: r.projectStatus?.toLowerCase() === 'completed' ? true : r.projectStatus ? false : null,
+            todayStatus: 'unknown',
+            yesterdayTaskDone: null,
+            dailyAttendance: {},
+            dailyTasks: {},
           };
         });
         setStudents(mapped);
-        setDirectorySource('sheets');
+        setDirectorySource('firestore');
         clientSwrCache.set(cacheKey, mapped, 120);
       }
     } catch (e) {
       console.error('Failed to load branch student directory from sheets:', e);
+      if (!cached) setStudents([]);
+      setDirectorySource('unavailable');
     } finally {
       setLoadingDirectory(false);
     }
   }, [branchCode, currentUser?.branch]);
 
   useEffect(() => {
-    fetchBranchStudentDirectory();
+    void Promise.resolve().then(fetchBranchStudentDirectory);
   }, [fetchBranchStudentDirectory]);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -213,7 +190,7 @@ function StudentManagementContent() {
     }
     const ld = getLiveDateInfo();
     return getWorkingDaysForMonth(ld.year, ld.month);
-  }, [trackerData?.workingDays, selectedMonth]);
+  }, [trackerData, selectedMonth]);
 
   const fetchTracker = useCallback(async (monthToFetch?: string) => {
     if (!staffId || !branchCode) return;
@@ -245,7 +222,7 @@ function StudentManagementContent() {
   }, [staffId, branchCode, selectedMonth]);
 
   useEffect(() => {
-    fetchTracker();
+    void Promise.resolve().then(() => fetchTracker());
   }, [fetchTracker]);
 
   const handleMonthChange = (monthKey: string) => {
@@ -376,16 +353,17 @@ function StudentManagementContent() {
     college: '',
     domain: 'Full Stack Web (MERN)',
     branch: 'Coimbatore' as Branch,
-    mentorName: currentUser?.name || 'Staff Mentor',
-    mentorRole: 'Senior Full Stack Lead',
-    feeStatus: 'paid' as 'paid' | 'partial' | 'pending',
-    startDate: '2026-07-01',
-    endDate: '2026-09-30',
+    mentorName: currentUser?.name || '',
+    mentorRole: '',
+    feeStatus: 'pending' as 'paid' | 'partial' | 'pending',
+    startDate: '',
+    endDate: '',
     projectTitle: '',
     projectCompleted: false,
   });
 
   const openAddModal = () => {
+    setStudentError(null);
     setEditingStudent(null);
     setFormData({
       name: '',
@@ -394,11 +372,11 @@ function StudentManagementContent() {
       college: '',
       domain: 'Full Stack Web (MERN)',
       branch: (currentUser?.branch as Branch) || 'Coimbatore',
-      mentorName: currentUser?.name || 'Staff Mentor',
-      mentorRole: 'Senior Full Stack Lead',
-      feeStatus: 'paid',
-      startDate: '2026-07-01',
-      endDate: '2026-09-30',
+      mentorName: currentUser?.name || '',
+      mentorRole: '',
+      feeStatus: 'pending',
+      startDate: '',
+      endDate: '',
       projectTitle: '',
       projectCompleted: false,
     });
@@ -406,6 +384,7 @@ function StudentManagementContent() {
   };
 
   const openEditModal = (s: Student) => {
+    setStudentError(null);
     setEditingStudent(s);
     setFormData({
       name: s.name,
@@ -416,71 +395,46 @@ function StudentManagementContent() {
       branch: s.branch,
       mentorName: s.mentorName,
       mentorRole: s.mentorRole,
-      feeStatus: s.feeStatus,
+      feeStatus: s.feeStatus === 'unknown' ? 'pending' : s.feeStatus,
       startDate: s.startDate,
       endDate: s.endDate,
       projectTitle: s.projectTitle,
-      projectCompleted: s.projectCompleted,
+      projectCompleted: s.projectCompleted ?? false,
     });
   };
 
-  const handleSaveStudent = (e: React.FormEvent) => {
+  const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    const duration = calculateDuration(formData.startDate, formData.endDate) || '3 Months';
-
-    if (editingStudent) {
-      setStudents((prev) =>
-        prev.map((item) =>
-          item.id === editingStudent.id
-            ? {
-                ...item,
-                name: formData.name,
-                email: formData.email,
-                mobile: formData.mobile,
-                college: formData.college,
-                domain: formData.domain,
-                branch: formData.branch,
-                mentorName: formData.mentorName,
-                mentorRole: formData.mentorRole,
-                feeStatus: formData.feeStatus,
-                startDate: formData.startDate,
-                endDate: formData.endDate,
-                duration,
-                projectTitle: formData.projectTitle || item.projectTitle,
-                projectCompleted: formData.projectCompleted,
-              }
-            : item
-        )
-      );
-      setEditingStudent(null);
-    } else {
-      const newId = `std_${Date.now()}`;
-      const newStudent: Student = {
-        id: newId,
-        name: formData.name,
-        email: formData.email,
-        mobile: formData.mobile,
-        college: formData.college,
-        domain: formData.domain,
-        branch: formData.branch,
-        mentorName: formData.mentorName,
-        mentorRole: formData.mentorRole,
-        feeStatus: formData.feeStatus,
-        startDate: formData.startDate,
-        endDate: formData.endDate,
-        duration,
-        projectTitle: formData.projectTitle || `${formData.domain} Capstone Milestone`,
-        projectCompleted: formData.projectCompleted,
-        todayStatus: 'present',
-        yesterdayTaskDone: true,
-        dailyAttendance: { 1: 'present', 2: 'present', 3: 'present', 4: 'present', 5: 'present' },
-        dailyTasks: {
-          1: { title: 'Project kick-off & requirements setup', completed: true },
-          2: { title: 'Architecture design and schema modeling', completed: true },
-        },
-      };
-      setStudents([newStudent, ...students]);
+    if (!currentUser) return;
+    const studentId = editingStudent?.id || `std_${crypto.randomUUID()}`;
+    const mentorStaffId = editingStudent?.mentorStaffId || currentUser.id;
+    setStudentSaving(true);
+    try {
+      const response = await fetch('/api/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'student', branchCode: BRANCH_NAME_TO_CODE[formData.branch], staffId: mentorStaffId,
+          data: {
+            studentId, studentName: formData.name, branch: formData.branch,
+            college: formData.college, email: formData.email, mobile: formData.mobile,
+            course: formData.domain, domain: formData.domain, mentorStaffId,
+            mentorName: formData.mentorName, admissionDate: formData.startDate, endDate: formData.endDate,
+            feeStatus: formData.feeStatus, projectStatus: formData.projectCompleted ? 'completed' : 'in_progress',
+            projectTitle: formData.projectTitle, studentStatus: 'active',
+          },
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Student record could not be saved.');
+      setDirectorySource('firestore');
       setIsAddModalOpen(false);
+      setEditingStudent(null);
+      await fetchBranchStudentDirectory();
+    } catch (error) {
+      setStudentError(error instanceof Error ? error.message : 'Student record could not be saved.');
+    } finally {
+      setStudentSaving(false);
     }
   };
 
@@ -585,7 +539,7 @@ function StudentManagementContent() {
           metadata: {
             'Exported By': currentUser?.name || 'Administrator',
             'Branch': (currentUser?.branch as string) || 'Coimbatore',
-            'Source': directorySource === 'sheets' ? 'Live Google Sheets (06_Student_Directory)' : 'Local Cache',
+            'Source': directorySource === 'firestore' ? 'Firestore' : 'Unavailable',
           },
           headers: [
             'Student ID',
@@ -611,7 +565,7 @@ function StudentManagementContent() {
             s.endDate,
             s.duration,
             s.feeStatus.toUpperCase(),
-            s.projectCompleted ? 'Completed' : 'Ongoing',
+            s.projectCompleted === null ? 'Unknown' : s.projectCompleted ? 'Completed' : 'In Progress',
           ]),
         });
       }
@@ -637,13 +591,13 @@ function StudentManagementContent() {
             description: `Supervised trainee roster for ${currentUser?.branch || 'Coimbatore'} branch across technology cohorts.`,
             table: {
               headers: ['Student ID', 'Student Name', 'College', 'Domain', 'Fee', 'Project'],
-              rows: (activeTab === 'tracker' && trackerData?.students && trackerData.students.length > 0 ? trackerData.students : students).map((s: any) => [
-                s.studentId || s.id,
-                s.studentName || s.name,
-                s.college || 'Engineering College',
+              rows: (activeTab === 'tracker' && trackerData?.students && trackerData.students.length > 0 ? trackerData.students : students).map((s) => [
+                ('studentId' in s ? s.studentId : ('id' in s ? s.id : undefined)) || '',
+                ('studentName' in s ? s.studentName : s.name) || '',
+                ('college' in s && s.college) || 'Engineering College',
                 s.domain,
-                (s.feeStatus || 'Paid').toUpperCase(),
-                s.projectCompleted || s.completionPct ? 'Active' : 'In Progress',
+                (('feeStatus' in s ? s.feeStatus : undefined) || 'Paid').toUpperCase(),
+                ('projectCompleted' in s && s.projectCompleted) || ('completionPct' in s && Boolean(s.completionPct)) ? 'Active' : 'In Progress',
               ]),
               columnWidthsPercentage: [18, 22, 22, 20, 9, 9],
             },
@@ -673,9 +627,9 @@ function StudentManagementContent() {
               <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[var(--brand-container,#E8F0FE)] text-[var(--brand-on-container,#1A73E8)] border border-[var(--border-subtle,#D2E3FC)]">
                 06_Student_Directory & ATT_{staffId}
               </span>
-              {directorySource === 'sheets' && (
+              {directorySource === 'firestore' && (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Live Google Sheets
+                  Firestore data
                 </span>
               )}
             </div>
@@ -952,7 +906,7 @@ function StudentManagementContent() {
                   {filteredStudents.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-12 text-center text-slate-500">
-                        No students match the current filters.
+                        {loadingDirectory ? 'Loading student records…' : directorySource === 'unavailable' ? 'Student records are unavailable. Try again when Firestore is connected.' : 'No students match the current filters.'}
                       </td>
                     </tr>
                   ) : (
@@ -990,7 +944,7 @@ function StudentManagementContent() {
                               ? 'bg-blue-50 text-blue-700 border-blue-200'
                               : 'bg-slate-100 text-slate-600 border-slate-200'
                           }`}>
-                            {s.projectCompleted ? 'Completed' : 'In Progress'}
+                            {s.projectCompleted === null ? 'Unknown' : s.projectCompleted ? 'Completed' : 'In Progress'}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
@@ -1680,7 +1634,7 @@ function StudentManagementContent() {
               </div>
               <div>
                 <p className="text-slate-500 font-medium">Capstone Project</p>
-                <p className="font-semibold text-slate-800">{selectedStudentForDossier.projectTitle || 'Capstone Milestone'}</p>
+                <p className="font-semibold text-slate-800">{selectedStudentForDossier.projectTitle || 'Not provided'}</p>
               </div>
             </div>
 
@@ -1730,6 +1684,17 @@ function StudentManagementContent() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className="font-medium text-slate-700 block mb-1">Email *</label>
+                  <input required type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:border-blue-600" />
+                </div>
+                <div>
+                  <label className="font-medium text-slate-700 block mb-1">Mobile</label>
+                  <input type="tel" value={formData.mobile} onChange={(e) => setFormData({ ...formData, mobile: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:border-blue-600" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
                   <label className="font-medium text-slate-700 block mb-1">College *</label>
                   <input
                     required
@@ -1758,6 +1723,7 @@ function StudentManagementContent() {
                 <div>
                   <label className="font-medium text-slate-700 block mb-1">Start Date</label>
                   <input
+                    required
                     type="date"
                     value={formData.startDate}
                     onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
@@ -1767,6 +1733,7 @@ function StudentManagementContent() {
                 <div>
                   <label className="font-medium text-slate-700 block mb-1">End Date</label>
                   <input
+                    required
                     type="date"
                     value={formData.endDate}
                     onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
@@ -1780,7 +1747,7 @@ function StudentManagementContent() {
                   <label className="font-medium text-slate-700 block mb-1">Fee Status</label>
                   <select
                     value={formData.feeStatus}
-                    onChange={(e) => setFormData({ ...formData, feeStatus: e.target.value as any })}
+                    onChange={(e) => setFormData({ ...formData, feeStatus: e.target.value as 'paid' | 'partial' | 'pending' })}
                     className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:border-blue-600"
                   >
                     <option value="paid">Paid</option>
@@ -1798,8 +1765,18 @@ function StudentManagementContent() {
                   />
                 </div>
               </div>
+
+              <div>
+                <label className="font-medium text-slate-700 block mb-1">Project Title</label>
+                <input type="text" maxLength={200} value={formData.projectTitle} onChange={(e) => setFormData({ ...formData, projectTitle: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-xs outline-none focus:border-blue-600" />
+                <label className="mt-2 flex items-center gap-2 text-slate-700">
+                  <input type="checkbox" checked={formData.projectCompleted} onChange={(e) => setFormData({ ...formData, projectCompleted: e.target.checked })} />
+                  Project completed
+                </label>
+              </div>
             </div>
 
+            {studentError && <p role="alert" className="text-sm text-rose-700">{studentError}</p>}
             <div className="flex justify-end gap-2 pt-3 border-t">
               <Button
                 variant="secondary"
@@ -1811,8 +1788,8 @@ function StudentManagementContent() {
               >
                 Cancel
               </Button>
-              <Button variant="primary" type="submit">
-                {editingStudent ? 'Save Changes' : 'Enroll Trainee'}
+              <Button variant="primary" type="submit" disabled={studentSaving}>
+                {studentSaving ? 'Saving…' : editingStudent ? 'Save Changes' : 'Enroll Trainee'}
               </Button>
             </div>
           </form>

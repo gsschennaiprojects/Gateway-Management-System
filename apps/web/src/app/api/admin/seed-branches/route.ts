@@ -6,12 +6,14 @@
 
 import { NextResponse } from 'next/server';
 import { BRANCH_SEED_DATA } from '@/lib/seed-branches';
-import { upsertBranch, getUserProfile } from '@/lib/firestore';
 import { getSession } from '@/lib/auth/session';
+import { getAdminFirestore } from '@/lib/firebase/firebase-admin';
+import { isSameOriginRequest } from '@/lib/api/request-security';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST() {
+export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
   try {
     // Check session — basic auth guard
     const authSession = await getSession();
@@ -26,10 +28,15 @@ export async function POST() {
     }
 
     // Seed all branches
+    const db = getAdminFirestore();
+    if (!db) return NextResponse.json({ error: 'Branch storage is unavailable.' }, { status: 503 });
     const results: string[] = [];
     for (const branch of BRANCH_SEED_DATA) {
-      await upsertBranch(branch);
-      results.push(`✅ ${branch.branchCode}: ${branch.branchName}`);
+      const safeBranch = { ...branch, spreadsheetId: '' };
+      await db.collection('branches').doc(branch.branchId).set({
+        ...safeBranch, updatedAt: new Date().toISOString(),
+      }, { merge: true });
+      results.push(`${branch.branchCode}: ${branch.branchName}`);
     }
 
     return NextResponse.json({

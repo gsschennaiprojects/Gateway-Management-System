@@ -167,7 +167,7 @@ export function TaskPointInput({
           <Sparkles className="w-3.5 h-3.5 text-[var(--brand-primary,#1A73E8)] shrink-0" />
           <span className="shrink-0 font-medium">Sheets Semicolon Format:</span>
           <span className="font-mono text-[10px] truncate text-[var(--text-muted,#747775)]" title={semicolonPreview}>
-            "{semicolonPreview}"
+            &quot;{semicolonPreview}&quot;
           </span>
         </div>
       )}

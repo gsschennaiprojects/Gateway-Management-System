@@ -15,7 +15,7 @@ export function SyncStatusPill() {
   useEffect(() => {
     // Initial check
     if (typeof window !== 'undefined' && !navigator.onLine) {
-      setSyncState('offline');
+      queueMicrotask(() => setSyncState('offline'));
     }
 
     const handleOnline = () => {

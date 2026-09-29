@@ -60,7 +60,7 @@ const HR = {
     const row = [
       hrId,
       data.HR_Name || '',
-      data.Branch_ID || GSS_CONFIG.BRANCHES.BRANCH_01.ID,
+      data.Branch_ID || getCurrentBranchConfig().ID,
       data.Email || '',
       data.Mobile || '',
       data.Designation || 'HR Executive',

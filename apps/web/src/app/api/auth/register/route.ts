@@ -1,207 +1,83 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, deleteUser, stripSensitive, findUserByIdentifier } from '@/lib/auth/user-store';
-import { RegisterPayload, BRANCHES } from '@/types/auth';
-import { BRANCH_SPREADSHEET_MAP, BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
+import { BRANCHES, type UserRole } from '@/types/auth';
+import { getAdminAuth, getAdminFirestore } from '@/lib/firebase/firebase-admin';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
-  let requestEmail = '';
+function validOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get('origin');
+  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl && process.env.NODE_ENV === 'production') return false;
+  const expected = appUrl ? new URL(appUrl).origin : new URL(request.url).origin;
+  return origin === expected;
+}
+
+export async function POST(request: NextRequest) {
+  if (!validOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (Number(request.headers.get('content-length') || 0) > 16_384) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  let uid: string | undefined;
+  let auth: ReturnType<typeof getAdminAuth> = null;
   try {
-    const body = await req.json();
-    const {
-      name,
-      email,
-      mobile,
-      requestedRole,
-      branch,
-      specialization,
-      specializations,
-      startMonthYear,
-      startDate,
-      endDate,
-      password
-    } = body as RegisterPayload;
-    requestEmail = email?.trim()?.toLowerCase() || '';
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid registration details.' }, { status: 400 });
+    const input = body as Record<string, unknown>;
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+    const mobile = typeof input.mobile === 'string' ? input.mobile.replace(/\D/g, '').slice(-10) : '';
+    const password = typeof input.password === 'string' ? input.password : '';
+    const branch = input.branch;
+    const requestedRole = input.requestedRole;
+    const specialization = typeof input.specialization === 'string' ? input.specialization.trim() : '';
+    const specializations = Array.isArray(input.specializations)
+      ? input.specializations.filter((value): value is string => typeof value === 'string').map(value => value.trim()).filter(Boolean)
+      : specialization ? [specialization] : [];
 
-    // Public registration may request only entry-level roles. Elevated roles
-    // are assigned through the authenticated Super Admin workflow.
-    if (!['employee', 'intern'].includes(requestedRole)) {
-      return NextResponse.json({ error: 'Select a supported staff role.' }, { status: 400 });
+    if (name.length < 2 || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+        mobile.length !== 10 || !BRANCHES.includes(branch as typeof BRANCHES[number]) ||
+        !['employee', 'intern'].includes(String(requestedRole)) || password.length < 8 || password.length > 128 ||
+        specializations.length === 0 || specializations.length > 10) {
+      return NextResponse.json({ error: 'Please provide valid registration details.' }, { status: 400 });
     }
+    const db = getAdminFirestore();
+    auth = getAdminAuth();
+    if (!db || !auth) return NextResponse.json({ error: 'Registration service is unavailable.' }, { status: 503 });
 
-    if (!name?.trim()) {
-      return NextResponse.json({ error: 'Full name is required' }, { status: 400 });
-    }
+    const role = requestedRole as Extract<UserRole, 'employee' | 'intern'>;
+    const phoneKey = `+91${mobile}`;
+    const newAuthUser = await auth.createUser({ email, password, displayName: name, disabled: false });
+    uid = newAuthUser.uid;
+    const now = new Date().toISOString();
+    const employeeId = `GSS_${role === 'intern' ? 'INT' : 'EMP'}_${uid}`;
+    const userRef = db.collection('users').doc(uid);
+    const phoneRef = db.collection('phoneIndex').doc(phoneKey);
+    const projectionRef = db.collection('projection_jobs').doc(`staff:${uid}:created`);
 
-    if (!email?.trim() || !email.includes('@')) {
-      return NextResponse.json({ error: 'Valid email address is required' }, { status: 400 });
-    }
-
-    const cleanMobile = mobile?.replace(/\D/g, '');
-    if (!cleanMobile || cleanMobile.length < 10) {
-      return NextResponse.json({ error: 'Valid 10-digit mobile number is required' }, { status: 400 });
-    }
-
-    if (!branch || !BRANCHES.includes(branch)) {
-      return NextResponse.json(
-        { error: 'Please select a valid branch (Coimbatore, Chennai, Madurai, or Erode)' },
-        { status: 400 }
-      );
-    }
-
-    const domainsList = Array.isArray(specializations) && specializations.length > 0
-      ? specializations
-      : specialization?.trim()
-      ? [specialization.trim()]
-      : [];
-
-    if (domainsList.length === 0) {
-      return NextResponse.json(
-        { error: 'Please select or type at least one domain specialization' },
-        { status: 400 }
-      );
-    }
-
-    if (!password || password.length < 6) {
-      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPhone = cleanMobile.slice(-10);
-
-    // 1. Check in-memory user store
-    const existingInMem = findUserByIdentifier(cleanEmail) || findUserByIdentifier(cleanPhone);
-    if (existingInMem) {
-      return NextResponse.json({
-        error: 'An account with this Gmail address already exists. Redirecting to sign in...',
-        alreadyExists: true,
-        email: cleanEmail
-      }, { status: 409 });
-    }
-
-    // 2. Check Firestore collection directly for email/gmail/mobile
     try {
-      const { getAdminFirestore } = await import('@/lib/firebase/firebase-admin');
-      const db = getAdminFirestore();
-      if (db) {
-        let snap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
-        if (snap.empty) {
-          snap = await db.collection('users').where('gmail', '==', cleanEmail).limit(1).get();
-        }
-        if (snap.empty && cleanPhone.length >= 10) {
-          snap = await db.collection('users').where('mobile', '==', cleanPhone).limit(1).get();
-        }
-        if (!snap.empty) {
-          return NextResponse.json({
-            error: 'An account with this Gmail address already exists. Redirecting to sign in...',
-            alreadyExists: true,
-            email: cleanEmail
-          }, { status: 409 });
-        }
-      }
-    } catch (fsErr) {
-      console.warn('[Register] Firestore duplicate check note:', fsErr);
-    }
-
-    let professionalId: string | undefined;
-    try {
-      const { getNextProfessionalUserId } = await import('@/lib/firebase/firebase-admin');
-      professionalId = await getNextProfessionalUserId(requestedRole);
-    } catch {
-      // Fallback handled by createUser's generator
-    }
-
-    const newUser = createUser({
-      id: professionalId,
-      name,
-      email: cleanEmail,
-      mobile: cleanMobile,
-      requestedRole: requestedRole || 'intern',
-      branch,
-      specialization: domainsList.join(', '),
-      specializations: domainsList,
-      startMonthYear: startMonthYear || new Date().toISOString().substring(0, 7),
-      startDate,
-      endDate,
-      password
-    });
-
-
-    // 3. AWAIT Firestore persistence directly so serverless execution environment does not terminate before write
-    let userPersisted = false;
-    try {
-      const { syncUserToFirestore } = await import('@/lib/firebase/firebase-admin');
-      userPersisted = await syncUserToFirestore({
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        mobile: newUser.mobile,
-        role: newUser.role,
-        status: newUser.status,
-        branch: newUser.branch,
-        specialization: newUser.specialization,
-        specializations: newUser.specializations,
-        startMonthYear: newUser.startMonthYear,
-        startDate: newUser.startDate,
-        endDate: newUser.endDate,
-        passwordHash: newUser.passwordHash,
-        createdAt: newUser.createdAt
+      await db.runTransaction(async transaction => {
+        const existingPhone = await transaction.get(phoneRef);
+        if (existingPhone.exists) throw new Error('DUPLICATE_PHONE');
+        transaction.create(userRef, {
+          uid, employeeId, name, email, gmail: email, mobile: phoneKey, role, status: 'pending',
+          branch: branch as string, branchId: String(branch).toUpperCase(), specialization: specializations[0],
+          specializations, startMonthYear: typeof input.startMonthYear === 'string' ? input.startMonthYear : now.slice(0, 7),
+          ...(typeof input.startDate === 'string' ? { startDate: input.startDate } : {}),
+          ...(typeof input.endDate === 'string' ? { endDate: input.endDate } : {}), createdAt: now, updatedAt: now,
+        });
+        transaction.create(phoneRef, { uid, employeeId, createdAt: now });
+        transaction.create(projectionRef, { id: projectionRef.id, type: 'staff.upsert', entityId: uid, branchId: String(branch).toUpperCase(), state: 'pending', attempts: 0, createdAt: now });
       });
-    } catch (fsErr) {
-      console.warn('[Register] Firestore sync note:', fsErr);
+    } catch (error) {
+      await auth.deleteUser(uid).catch(() => undefined);
+      uid = undefined;
+      if (error instanceof Error && error.message === 'DUPLICATE_PHONE') return NextResponse.json({ error: 'An account with this email or mobile already exists.' }, { status: 409 });
+      throw error;
     }
 
-    if (!userPersisted) {
-      deleteUser(newUser.id);
-      return NextResponse.json(
-        { error: 'We could not save your registration. Please try again shortly.' },
-        { status: 503 }
-      );
-    }
-
-    // 4. Google Sheets directory sync (with timeout protection)
-    try {
-      const branchCode = BRANCH_NAME_TO_CODE[newUser.branch];
-      const spreadsheetId = branchCode ? BRANCH_SPREADSHEET_MAP[branchCode] : null;
-      if (spreadsheetId) {
-        const { upsertStaffDirectory } = await import('@/lib/sheets/sheets-service');
-        await Promise.race([
-          upsertStaffDirectory(spreadsheetId, {
-            staffId: newUser.id,
-            fullName: newUser.name,
-            role: newUser.role,
-            designation: newUser.specialization || newUser.role,
-            department: 'Operations',
-            email: newUser.email,
-            mobile: newUser.mobile,
-            joiningDate: newUser.startDate || new Date().toISOString().split('T')[0],
-            reportingManager: 'Management',
-            accountStatus: 'Pending',
-            firebaseUid: newUser.id
-          }),
-          new Promise((resolve) => setTimeout(resolve, 3000))
-        ]);
-      }
-    } catch (sheetErr) {
-      console.warn('[Register] Google Sheets sync note:', sheetErr);
-    }
-
-    const safeUser = stripSensitive(newUser);
-    return NextResponse.json({
-      success: true,
-      message: 'Your account has been registered and is pending approval.',
-      user: safeUser
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message.toLowerCase().includes('already exists')) {
-      return NextResponse.json({
-        error: 'An account with this Gmail address already exists. Redirecting to sign in...',
-        alreadyExists: true,
-        email: requestEmail
-      }, { status: 409 });
-    }
-    const message = err instanceof Error ? err.message : 'Registration failed';
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ success: true, message: 'Your account is registered and awaiting approval.', user: {
+      id: employeeId, name, email, mobile: phoneKey, role, status: 'pending', branch, specialization: specializations[0], createdAt: now,
+    } }, { status: 201 });
+  } catch {
+    if (uid && auth) await auth.deleteUser(uid).catch(() => undefined);
+    return NextResponse.json({ error: 'Registration service is unavailable. Please try again.' }, { status: 503 });
   }
 }

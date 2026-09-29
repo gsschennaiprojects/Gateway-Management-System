@@ -62,7 +62,7 @@ const Intern = {
     const row = [
       internId,
       data.Intern_Name || '',
-      data.Branch_ID || GSS_CONFIG.BRANCHES.BRANCH_01.ID,
+      data.Branch_ID || getCurrentBranchConfig().ID,
       data.College || '',
       data.Department || '',
       data.Domain || 'Web Development',

@@ -133,7 +133,7 @@ const Employee = {
     const row = [
       empId,
       data.Employee_Name || '',
-      data.Branch_ID || GSS_CONFIG.BRANCHES.BRANCH_01.ID,
+      data.Branch_ID || getCurrentBranchConfig().ID,
       data.Email || '',
       data.Mobile || '',
       data.Designation || 'Software Engineer',

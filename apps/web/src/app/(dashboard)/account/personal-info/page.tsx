@@ -16,7 +16,6 @@ import {
   Globe,
   Clock,
   Camera,
-  Pencil,
   X,
   Check,
 } from 'lucide-react';

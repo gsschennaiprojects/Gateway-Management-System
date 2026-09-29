@@ -1,13 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   getLiveDateInfo,
   calculateWorkingTime,
   calculateLiveElapsedWorkingTime,
   parseTasks,
-  serializeTasks,
   LiveDateInfo,
   WorkingTimeCalculation,
 } from './worklog-session-utils';
@@ -79,13 +78,13 @@ export function useDailySession() {
     if (loginTime && logoutTime) {
       const calc = calculateWorkingTime(loginTime, logoutTime);
       if (calc) {
-        setTotalHours(calc.decimalHours.toFixed(2));
+        queueMicrotask(() => setTotalHours(calc.decimalHours.toFixed(2)));
       }
-      setElapsedTime(null);
+      queueMicrotask(() => setElapsedTime(null));
     } else if (loginTime && !logoutTime) {
-      setElapsedTime(calculateLiveElapsedWorkingTime(loginTime));
+      queueMicrotask(() => setElapsedTime(calculateLiveElapsedWorkingTime(loginTime)));
     } else {
-      setElapsedTime(null);
+      queueMicrotask(() => setElapsedTime(null));
     }
   }, [loginTime, logoutTime]);
 
@@ -115,7 +114,7 @@ export function useDailySession() {
           if (Array.isArray(parsed.completedTasks)) setCompletedTasks(parsed.completedTasks);
           if (parsed.incompleteReason) setIncompleteReason(parsed.incompleteReason);
           if (parsed.totalHours) setTotalHours(parsed.totalHours);
-        } catch (e) {
+        } catch {
           // ignore cache parse error
         }
       }
@@ -186,7 +185,7 @@ export function useDailySession() {
 
   // Initial load
   useEffect(() => {
-    loadSession();
+    void Promise.resolve().then(loadSession);
   }, [loadSession]);
 
   // Listen for sync events from other components / pages
@@ -269,12 +268,13 @@ export function useDailySession() {
           return false;
         }
 
-        setLoginTime(timeToSet);
+        const recordedLoginTime = data.entry?.loginTime || timeToSet;
+        setLoginTime(recordedLoginTime);
         setIsPunchedIn(true);
-        setSuccess(`Logged in successfully at ${timeToSet}. Planned tasks appended to database.`);
+        setSuccess(`Logged in successfully at ${recordedLoginTime}. Planned tasks saved.`);
 
-        updateLocalStorage({ loginTime: timeToSet, plannedTasks: validPlanned, explicitPunch: true });
-        broadcastSync({ loginTime: timeToSet, isPunchedIn: true, plannedTasks: validPlanned });
+        updateLocalStorage({ loginTime: recordedLoginTime, plannedTasks: validPlanned, explicitPunch: true });
+        broadcastSync({ loginTime: recordedLoginTime, isPunchedIn: true, plannedTasks: validPlanned });
         return true;
       } catch (e) {
         console.error('[punchIn] Error:', e);
@@ -329,23 +329,23 @@ export function useDailySession() {
           return false;
         }
 
-        const workingCalc = data.workingCalc || calculateWorkingTime(loginTime, timeToSet);
-        const computedHours = workingCalc ? workingCalc.decimalHours.toFixed(2) : '8.5';
-        const formattedTotal = workingCalc ? workingCalc.formatted : `${computedHours} hrs`;
+        const recordedLogoutTime = data.entry?.logoutTime || timeToSet;
+        const workingCalc = data.workingCalc || calculateWorkingTime(loginTime, recordedLogoutTime);
+        const formattedTotal = workingCalc ? workingCalc.formatted : 'Unavailable';
 
-        setLogoutTime(timeToSet);
+        setLogoutTime(recordedLogoutTime);
         setIsPunchedOut(true);
         setTotalHours(formattedTotal);
         setSuccess(`Logged out successfully at ${timeToSet}. Total work duration: ${formattedTotal}`);
 
         updateLocalStorage({
-          logoutTime: timeToSet,
+          logoutTime: recordedLogoutTime,
           completedTasks: validCompleted,
           incompleteReason: incompleteReason.trim(),
           totalHours: formattedTotal,
         });
         broadcastSync({
-          logoutTime: timeToSet,
+          logoutTime: recordedLogoutTime,
           isPunchedOut: true,
           completedTasks: validCompleted,
           incompleteReason: incompleteReason.trim(),
@@ -417,17 +417,8 @@ export function useDailySession() {
       totalHours: '',
     });
 
-    try {
-      await fetch('/api/worklogs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'clearPunch', date: liveDate.isoDate }),
-      });
-      setSuccess('Punch session cleared. Ready to start new session.');
-    } catch (e) {
-      console.warn('[clearPunch] note:', e);
-    }
-  }, [storageKey, liveDate.isoDate, broadcastSync]);
+    setSuccess('Local worklog display cleared. The recorded attendance was not changed.');
+  }, [storageKey, broadcastSync]);
 
   // ── Action: Save Worklog ──────────────────────────────────────────────────
   const saveSession = useCallback(async () => {
@@ -459,7 +450,6 @@ export function useDailySession() {
       return;
     }
 
-    const nowInfo = getLiveDateInfo();
     const workingCalc = calculateWorkingTime(loginTime, logoutTime);
     const computedHours = workingCalc ? workingCalc.decimalHours.toFixed(2) : totalHours || '8.5';
 
@@ -482,29 +472,21 @@ export function useDailySession() {
     });
 
     try {
-      const res = await fetch('/api/worklogs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'save',
-          date: nowInfo.isoDate,
-          loginTime,
-          logoutTime,
-          plannedTasks: validPlanned,
-          completedTasks: validCompleted,
-          incompleteReason,
-          totalHours: computedHours,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setSuccess('Daily worklog & session synchronized with Google Sheets and Firestore!');
+      if (loginTime && !logoutTime) {
+        const res = await fetch('/api/worklogs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save', plannedTasks: validPlanned }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to save worklog.');
+        setSuccess('Worklog changes saved to the daily record.');
+      } else if (!loginTime) {
+        setSuccess('Draft saved on this device. The daily record is created when you punch in.');
       } else {
-        setError(data.error || 'Failed to sync worklog');
+        setSuccess('This worklog is closed. Its recorded values were not changed.');
       }
-    } catch (err) {
-      setError('Network error syncing daily worklog');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not save worklog.');
     } finally {
       setSaving(false);
     }
@@ -562,6 +544,7 @@ export function useDailySession() {
     requestPunchOut,
     cancelPunchOut,
     confirmPunchOut,
+    clearPunch,
     saveSession,
     refreshSession: loadSession,
     loading,

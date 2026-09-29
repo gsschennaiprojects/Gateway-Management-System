@@ -26,7 +26,7 @@ export const BRANCH_SEED_DATA: GSSBranch[] = [
     workStartTime: '09:00 AM',
     workEndTime: '06:00 PM',
     status: 'Active',
-    spreadsheetId: '1dfKmBvtc15H8JC-tybDMiBOfD0nVScDG1kR6Hpd-bxY',
+    spreadsheetId: '',
   },
   {
     branchId: 'BR_CBE_02',
@@ -39,7 +39,7 @@ export const BRANCH_SEED_DATA: GSSBranch[] = [
     workStartTime: '09:00 AM',
     workEndTime: '06:00 PM',
     status: 'Active',
-    spreadsheetId: '1pu0IxgbFYwSVXycWXVepXp76476SH1j7a-VxfY_cOnA',
+    spreadsheetId: '',
   },
   {
     branchId: 'BR_MDU_03',
@@ -52,7 +52,7 @@ export const BRANCH_SEED_DATA: GSSBranch[] = [
     workStartTime: '09:00 AM',
     workEndTime: '06:00 PM',
     status: 'Active',
-    spreadsheetId: '1j8JjIXk-9MyvkDTImXr5nZqsihRH5dvIDNluukS0LZ8',
+    spreadsheetId: '',
   },
   {
     branchId: 'BR_ERD_04',
@@ -65,7 +65,7 @@ export const BRANCH_SEED_DATA: GSSBranch[] = [
     workStartTime: '09:00 AM',
     workEndTime: '06:00 PM',
     status: 'Active',
-    spreadsheetId: '1PqPiWkXdelII7IaS5Ua-LJ1vsswYEQVG9YHynMoPegY',
+    spreadsheetId: '',
   },
 ];
 
@@ -73,7 +73,7 @@ export const BRANCH_SEED_DATA: GSSBranch[] = [
  * Map branch code to spreadsheet ID for quick lookups.
  */
 export const BRANCH_SPREADSHEET_MAP: Record<string, string> = Object.fromEntries(
-  BRANCH_SEED_DATA.map(b => [b.branchCode, b.spreadsheetId])
+  BRANCH_SEED_DATA.map(b => [b.branchCode, process.env[`SPREADSHEET_ID_${b.branchCode}`] || ''])
 );
 
 /**

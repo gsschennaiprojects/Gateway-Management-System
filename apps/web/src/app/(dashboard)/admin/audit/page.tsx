@@ -1,11 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import { ShieldAlert, RefreshCw, Filter, Search, Download, Calendar, User, Building2, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { ShieldAlert, RefreshCw, Filter, Search, Download, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { GlassPanel } from '@/components/ui/GlassPanel';
-import { StatusChip } from '@/components/ui/StatusChip';
 import { BRANCHES } from '@/types/auth';
 
 interface AuditLog {
@@ -24,14 +21,13 @@ interface AuditLog {
 }
 
 export default function AdminAuditPage() {
-  const { user } = useAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [branchFilter, setBranchFilter] = useState('All');
   const [moduleFilter, setModuleFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -49,11 +45,11 @@ export default function AdminAuditPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [branchFilter, moduleFilter]);
 
   useEffect(() => {
-    fetchLogs();
-  }, [branchFilter, moduleFilter]);
+    void Promise.resolve().then(fetchLogs);
+  }, [fetchLogs]);
 
   const filteredLogs = logs.filter((l) => {
     const q = searchQuery.toLowerCase();

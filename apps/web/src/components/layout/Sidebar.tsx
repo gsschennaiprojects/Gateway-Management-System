@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSidebar } from '@/context/SidebarContext';
@@ -22,8 +23,7 @@ import {
   CheckSquare,
   Settings,
   GraduationCap,
-  ClipboardList,
-  BookOpen
+  ClipboardList
 } from 'lucide-react';
 
 export interface NavSubItem {
@@ -424,9 +424,12 @@ export function Sidebar() {
               <div className="flex items-center gap-2.5 overflow-hidden min-w-0">
                 <div className="w-9 h-9 rounded-full overflow-hidden border border-[var(--border-card,#DADCE0)] shrink-0 bg-[var(--brand-container,#E8F0FE)] flex items-center justify-center relative shadow-xs">
                   {user.avatarUrl ? (
-                    <img
+                    <Image
                       src={user.avatarUrl}
                       alt={user.name}
+                      width={36}
+                      height={36}
+                      unoptimized
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -632,9 +635,12 @@ export function Sidebar() {
                 <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)]">
                   <div className="w-9 h-9 rounded-full overflow-hidden border border-[var(--border-card,#DADCE0)] shrink-0 bg-[var(--brand-container,#E8F0FE)] flex items-center justify-center relative shadow-xs">
                     {user.avatarUrl ? (
-                      <img
+                      <Image
                         src={user.avatarUrl}
                         alt={user.name}
+                        width={36}
+                        height={36}
+                        unoptimized
                         className="w-full h-full object-cover"
                       />
                     ) : (

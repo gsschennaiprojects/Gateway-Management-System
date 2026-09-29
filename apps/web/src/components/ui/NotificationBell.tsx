@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Check, CheckCheck, Users, Clock, CheckSquare, X } from 'lucide-react';
+import { Bell, CheckCheck, Users, Clock, CheckSquare } from 'lucide-react';
 import { TaskNotification } from '@/types/task';
 import Link from 'next/link';
 
@@ -26,7 +26,7 @@ export function NotificationBell() {
   };
 
   useEffect(() => {
-    fetchNotifications();
+    void Promise.resolve().then(fetchNotifications);
     const interval = setInterval(fetchNotifications, 15000);
     return () => clearInterval(interval);
   }, []);

@@ -1,16 +1,22 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bell, Download, X, CheckCircle2 } from 'lucide-react';
+import { Bell, Download, X } from 'lucide-react';
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
 
 export function PwaNotificationManager() {
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<'default' | 'granted' | 'denied'>('default');
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
 
   useEffect(() => {
+    let notificationPromptTimer: ReturnType<typeof setTimeout> | undefined;
     // 1. Register Service Worker
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
@@ -24,19 +30,19 @@ export function PwaNotificationManager() {
 
     // 2. Check Notification Permission
     if (typeof window !== 'undefined' && 'Notification' in window) {
-      setNotificationStatus(Notification.permission);
+      const permission = Notification.permission;
+      queueMicrotask(() => setNotificationStatus(permission));
       const dismissed = localStorage.getItem('gss_notification_prompt_dismissed');
       if (Notification.permission === 'default' && !dismissed) {
         // Show banner after brief delay for smooth UX
-        const timer = setTimeout(() => setShowNotificationPrompt(true), 1500);
-        return () => clearTimeout(timer);
+        notificationPromptTimer = setTimeout(() => setShowNotificationPrompt(true), 1500);
       }
     }
 
     // 3. Listen for PWA Install Prompt
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
       const dismissedInstall = localStorage.getItem('gss_install_prompt_dismissed');
       if (!dismissedInstall) {
         setShowInstallPrompt(true);
@@ -47,17 +53,20 @@ export function PwaNotificationManager() {
 
     // 4. Check if already installed
     if (window.matchMedia('(display-mode: standalone)').matches) {
-      setIsInstalled(true);
+      queueMicrotask(() => setIsInstalled(true));
     }
 
-    window.addEventListener('appinstalled', () => {
+    const handleAppInstalled = () => {
       setIsInstalled(true);
       setShowInstallPrompt(false);
       setDeferredPrompt(null);
-    });
+    };
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
+      if (notificationPromptTimer) clearTimeout(notificationPromptTimer);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
 
@@ -165,7 +174,7 @@ export function PwaNotificationManager() {
             <div className="flex-1 min-w-0">
               <h4 className="text-sm font-semibold text-white">Install GSS Management App</h4>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                Install as a standalone desktop or mobile application for instant access and offline attendance logging.
+                Install for quick access on desktop or mobile. Attendance and worklog changes require a connection.
               </p>
               <div className="flex items-center gap-2 mt-3">
                 <button

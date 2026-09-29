@@ -32,8 +32,6 @@ export function Input({
 
   const isPassword = type === 'password';
   const resolvedType = isPassword && showPassword ? 'text' : type;
-  const hasValue = value !== undefined && value !== '';
-
   return (
     <div className="space-y-1.5">
       {label && (

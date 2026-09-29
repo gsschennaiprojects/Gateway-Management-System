@@ -23,12 +23,14 @@ function LoginForm() {
     emailParam ? `An account with this Gmail address already exists. Please enter your password to sign in.` : null
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
-    if (emailParam) {
+    if (!emailParam) return;
+    queueMicrotask(() => {
       setIdentifier(emailParam);
-      setInfoMessage(`An account with this Gmail address already exists. Please enter your password to sign in.`);
-    }
+      setInfoMessage('An account with this Gmail address already exists. Please enter your password to sign in.');
+    });
   }, [emailParam]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,6 +54,29 @@ function LoginForm() {
 
     if (!result.success) {
       setError(result.error || 'Authentication failed. Please verify your credentials.');
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    setError(null);
+    setInfoMessage(null);
+    if (!identifier.trim()) {
+      setError('Enter the email address or mobile number on your account first.');
+      return;
+    }
+    setIsResetting(true);
+    try {
+      const response = await fetch('/api/auth/password-reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: identifier.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Password reset is temporarily unavailable.');
+      setInfoMessage(result.message);
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : 'Password reset is temporarily unavailable.');
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -129,10 +154,11 @@ function LoginForm() {
               </label>
               <button
                 type="button"
-                onClick={() => alert('Password reset link has been dispatched to your corporate administrator.')}
+                onClick={() => void handlePasswordReset()}
+                disabled={isResetting}
                 className="text-xs text-[var(--brand-primary)] hover:underline cursor-pointer"
               >
-                Forgot password?
+                {isResetting ? 'Sending reset link…' : 'Forgot password?'}
               </button>
             </div>
             <Input

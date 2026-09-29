@@ -27,7 +27,7 @@ interface CacheStats {
 }
 
 export class EnterpriseMemoryCache {
-  private cache = new Map<string, CacheEntry<any>>();
+  private cache = new Map<string, CacheEntry<unknown>>();
   private maxEntries: number;
   private defaultTtlMs: number;
   private defaultStaleMs: number;
@@ -206,7 +206,7 @@ export class EnterpriseMemoryCache {
 
 // Global singleton instance preserved across hot reloads in Next.js
 declare global {
-  // eslint-disable-next-line no-var
+
   var __gmsEnterpriseMemoryCache: EnterpriseMemoryCache | undefined;
 }
 

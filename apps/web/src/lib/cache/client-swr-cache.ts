@@ -11,7 +11,7 @@ interface ClientCacheEntry<T> {
   expiresAt: number;
 }
 
-const clientMemoryStore = new Map<string, ClientCacheEntry<any>>();
+const clientMemoryStore = new Map<string, ClientCacheEntry<unknown>>();
 
 export const clientSwrCache = {
   /**

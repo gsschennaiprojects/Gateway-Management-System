@@ -38,7 +38,7 @@ export default function DashboardLayout({
       <div className="min-h-screen bg-[var(--bg-canvas,#F8FAFD)] flex items-center justify-center text-[var(--text-primary,#1F1F1F)]">
         <div className="flex flex-col items-center gap-4 animate-panel-entrance">
           <div className="relative">
-            <BrandLogo size="xl" showText={false} glowOnHover={false} />
+            <BrandLogo size="xl" showText={false} />
             <Loader2 className="absolute -bottom-1 -right-1 w-5 h-5 animate-spin text-[var(--brand-primary,#1A73E8)]" />
           </div>
           <div className="text-center">

@@ -1,7 +1,7 @@
 import { UserRole, Branch } from './auth';
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
-export type TaskStatus = 'pending' | 'in_progress' | 'completed';
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'partially_stopped';
 export type TaskTargetType = 'individual' | 'group';
 
 export interface TaskGroupTarget {
