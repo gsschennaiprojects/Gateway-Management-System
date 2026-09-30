@@ -3,23 +3,15 @@ import { getFirestoreUserByIdentifier, type UserAuthRecord } from '@/lib/firebas
 import { setSessionCookie } from '@/lib/auth/session';
 import { checkLoginRateLimit } from '@/lib/auth/login-rate-limit';
 import { verifyPassword, hashPassword } from '@/lib/auth/password';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 import type { User } from '@/types/auth';
 
 export const dynamic = 'force-dynamic';
 const INVALID_CREDENTIALS = 'Invalid email/mobile or password.';
 
-function hasValidOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  if (!origin) return false;
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl && process.env.NODE_ENV === 'production') return false;
-  const configuredOrigin = appUrl ? new URL(appUrl).origin : new URL(request.url).origin;
-  return origin === configuredOrigin;
-}
-
 export async function POST(request: NextRequest) {
-  if (!hasValidOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
-  if (Number(request.headers.get('content-length') || 0) > 16_384) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (hasOversizedBody(request, 16_384)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
 
   try {
     const body: unknown = await request.json();

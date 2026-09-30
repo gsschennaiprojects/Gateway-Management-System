@@ -3,15 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getAdminFirestore, getFirestoreTasks, getFirestoreUsers } from '@/lib/firebase/firebase-admin';
 import type { TaskPriority, TaskStatus } from '@/types/task';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 
 export const dynamic = 'force-dynamic';
-
-function sameOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl && process.env.NODE_ENV === 'production') return false;
-  return !!origin && origin === (appUrl ? new URL(appUrl).origin : new URL(request.url).origin);
-}
 
 export async function GET() {
   const session = await getSession();
@@ -27,9 +21,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!sameOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
   if (!['admin', 'superadmin'].includes(session.user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  if (Number(request.headers.get('content-length') || 0) > 20_000) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (hasOversizedBody(request, 20_000)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid task.' }, { status: 400 });
@@ -100,8 +94,8 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!sameOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
-  if (Number(request.headers.get('content-length') || 0) > 10_000) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (hasOversizedBody(request, 10_000)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });

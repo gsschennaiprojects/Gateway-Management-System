@@ -3,17 +3,10 @@ import { getSession } from '@/lib/auth/session';
 import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 import { getFirestoreStudents, getFirestoreTasks, getFirestoreUserById, getFirestoreUsers, getFirestoreWorklogs, syncStudentToFirestore } from '@/lib/firebase/firebase-admin';
 import type { UserRole } from '@/types/auth';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 
 export const dynamic = 'force-dynamic';
 const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store, max-age=0' };
-
-function originAllowed(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl && process.env.NODE_ENV === 'production') return false;
-  const expected = appUrl ? new URL(appUrl).origin : new URL(request.url).origin;
-  return !!origin && origin === expected;
-}
 
 function resolveBranchCode(branchCode: string | null, branchName: string): string | null {
   if (branchCode) return branchCode.toUpperCase();
@@ -88,8 +81,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) return error(401, 'Unauthorized');
-  if (!originAllowed(request)) return error(403, 'Request origin is not allowed.');
-  if (Number(request.headers.get('content-length') || 0) > 32_768) return error(413, 'Request is too large.');
+  if (!isSameOriginRequest(request)) return error(403, 'Request origin is not allowed.');
+  if (hasOversizedBody(request, 32_768)) return error(413, 'Request is too large.');
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object') return error(400, 'Invalid request.');

@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BRANCHES, type UserRole } from '@/types/auth';
 import { getAdminAuth, getAdminFirestore } from '@/lib/firebase/firebase-admin';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 
 export const dynamic = 'force-dynamic';
 
-function validOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl && process.env.NODE_ENV === 'production') return false;
-  const expected = appUrl ? new URL(appUrl).origin : new URL(request.url).origin;
-  return origin === expected;
-}
-
 export async function POST(request: NextRequest) {
-  if (!validOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
-  if (Number(request.headers.get('content-length') || 0) > 16_384) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (hasOversizedBody(request, 16_384)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   let uid: string | undefined;
   let auth: ReturnType<typeof getAdminAuth> = null;
   try {

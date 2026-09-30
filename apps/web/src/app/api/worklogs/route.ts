@@ -3,16 +3,9 @@ import { getSession } from '@/lib/auth/session';
 import { getAdminFirestore, getFirestoreWorklogs, getFirestoreUserById } from '@/lib/firebase/firebase-admin';
 import { calculateWorkingTime, getLiveDateInfo, parseTasks } from '@/lib/worklogs/worklog-session-utils';
 import { canViewUserWorkLogs } from '@/lib/rbac/permissions';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 
 export const dynamic = 'force-dynamic';
-
-function hasValidOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  const configuredUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!configuredUrl && process.env.NODE_ENV === 'production') return false;
-  const expected = configuredUrl ? new URL(configuredUrl).origin : new URL(request.url).origin;
-  return origin === expected;
-}
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -32,8 +25,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!hasValidOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
-  if (Number(request.headers.get('content-length') || 0) > 16_384) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (hasOversizedBody(request, 16_384)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {

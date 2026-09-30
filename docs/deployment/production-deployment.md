@@ -110,7 +110,7 @@ Configure these environment variables in your deployment environment (Vercel Pro
 | :--- | :---: | :---: | :--- |
 | `NODE_ENV` | Server | Yes | Set to `production` |
 | `NEXT_PUBLIC_APP_NAME` | Client / Server | Yes | Portal branding title |
-| `NEXT_PUBLIC_APP_URL` | Client / Server | Yes | Base URL (e.g. `https://gms.gatewayskill.in`) |
+| `NEXT_PUBLIC_APP_URL` | Client / Server | Yes | Base URL: use `https://${VERCEL_PROJECT_PRODUCTION_URL}` for dynamic auto-updating domain on Vercel, or custom domain `https://gms.gatewayskill.in` |
 | `NEXT_PUBLIC_FIREBASE_API_KEY` | Client / Browser | Yes | Firebase Web Client API Key |
 | `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Client / Browser | Yes | Firebase Auth domain |
 | `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Client / Browser | Yes | Firebase Project ID (`gss-management-system-eef75`) |

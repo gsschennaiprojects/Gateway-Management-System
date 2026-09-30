@@ -5,16 +5,9 @@ import { getAdminAuth, getAdminFirestore, getFirestoreUsers } from '@/lib/fireba
 import { canDeleteUser, canManageTargetUser } from '@/lib/rbac/permissions';
 import { BRANCHES, type UserRole, type UserStatus } from '@/types/auth';
 import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 
 export const dynamic = 'force-dynamic';
-
-function sameOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl && process.env.NODE_ENV === 'production') return false;
-  const expected = appUrl ? new URL(appUrl).origin : new URL(request.url).origin;
-  return origin === expected;
-}
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -36,8 +29,8 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!sameOrigin(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
-  if (Number(request.headers.get('content-length') || 0) > 16_384) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (hasOversizedBody(request, 16_384)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   if (!['superadmin', 'admin'].includes(session.user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   try {
     const body: unknown = await request.json();

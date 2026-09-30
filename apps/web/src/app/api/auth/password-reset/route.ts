@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFirestoreUserByIdentifier } from '@/lib/firebase/firebase-admin';
 import { checkLoginRateLimit } from '@/lib/auth/login-rate-limit';
+import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 
 export const dynamic = 'force-dynamic';
 const GENERIC_MESSAGE = 'If an eligible account matches that identifier, a password reset email will be sent.';
 
-function originAllowed(request: NextRequest): boolean {
-  const origin = request.headers.get('origin');
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl && process.env.NODE_ENV === 'production') return false;
-  return !!origin && origin === (appUrl ? new URL(appUrl).origin : new URL(request.url).origin);
-}
-
 export async function POST(request: NextRequest) {
-  if (!originAllowed(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
-  if (Number(request.headers.get('content-length') || 0) > 4096) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+  if (hasOversizedBody(request, 4096)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   try {
     const body: unknown = await request.json();
     const identifier = body && typeof body === 'object' ? (body as { identifier?: unknown }).identifier : null;
