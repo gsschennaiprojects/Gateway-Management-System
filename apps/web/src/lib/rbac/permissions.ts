@@ -1,3 +1,22 @@
+/**
+ * Enterprise Role-Based Access Control (RBAC) & Boundary Enforcement
+ *
+ * PURPOSE:
+ * Centralizes granular permission definitions, hierarchical role matrices,
+ * and cross-branch isolation rules for all enterprise users.
+ *
+ * AUTHORIZATION TIERS:
+ * - `superadmin`: Unrestricted access across all regional branches and modules.
+ * - `admin`: Administrative authority strictly scoped to their own operational branch.
+ * - `hr`: People operations, staff directory, and attendance management.
+ * - `employee`: Domain specialists, task executors, and student project mentors.
+ * - `intern`: Task assignees with self-scoped worklog and student management access.
+ *
+ * SECURITY PRINCIPLE:
+ * UI visibility checks MUST always be reinforced by server-side checks in Next.js API
+ * route handlers and Cloud Firestore security rules.
+ */
+
 import { UserRole, User } from '@/types/auth';
 
 export type Permission =

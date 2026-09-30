@@ -1,3 +1,19 @@
+/**
+ * Server-Side Cryptographic Session Management
+ *
+ * PURPOSE:
+ * Generates, signs, verifies, and invalidates authenticated session cookies
+ * using HMAC-SHA256 signatures with constant-time equality checks.
+ *
+ * SECURITY ATTRIBUTES:
+ * - Transport: HTTP-only, SameSite=Lax, Secure (HTTPS in production).
+ * - Anti-Tamper: HMAC-SHA256 signature verified with `crypto.timingSafeEqual`
+ *   to mitigate timing attacks.
+ * - Lifetime: 7 days (`SESSION_MAX_AGE = 604800` seconds).
+ * - Zero Browser Storage: Management sessions are never stored in `localStorage`
+ *   or `sessionStorage` to eliminate XSS token theft vectors.
+ */
+
 import { cookies } from 'next/headers';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import type { User, AuthSession } from '@/types/auth';

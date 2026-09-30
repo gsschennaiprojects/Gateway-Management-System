@@ -1,3 +1,23 @@
+/**
+ * Task Allocation & Notification Domain Models
+ *
+ * PURPOSE:
+ * Defines task assignment structures, state-machine transitions, and team
+ * broadcast notification models.
+ *
+ * TASK STATE MACHINE:
+ * 1. `pending`: Newly assigned task awaiting acknowledgement.
+ * 2. `in_progress`: Assignee has started working on the task (`startedAt` stamped).
+ * 3. `completed`: Successfully finalized deliverable (`completedAt` stamped).
+ * 4. `partially_stopped`: Work paused with a mandatory 10+ character explanation (`stoppedAt`, `stopReason`).
+ *
+ * DATA AUTHORITY:
+ * Cloud Firestore (`tasks` and `task_history` collections).
+ *
+ * PROJECTIONS:
+ * Synchronized to the per-staff `TSK_<staffId>` tab in the operational spreadsheet.
+ */
+
 import { UserRole, Branch } from './auth';
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';

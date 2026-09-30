@@ -1,5 +1,21 @@
 'use client';
 
+/**
+ * Client-Side Authentication Context & Session Provider
+ *
+ * PURPOSE:
+ * Manages the global authenticated user state in the browser runtime.
+ * Provides login, registration, session refresh, and safe logout dialog controls.
+ *
+ * SECURITY & DATA FLOW:
+ * - Session Hydration: Initialized on mount via `GET /api/auth/me`. The server
+ *   validates the cryptographically signed `gss_session` HTTP-only cookie.
+ * - Zero Local Storage: Neither session tokens nor user credentials are stored
+ *   in browser storage (`localStorage` / `sessionStorage`).
+ * - Logout Flow: Clears the server-side cookie via `POST /api/auth/logout` before
+ *   resetting client-side user state and redirecting to `/login`.
+ */
+
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, LoginCredentials, RegisterPayload } from '@/types/auth';
 import { useRouter } from 'next/navigation';

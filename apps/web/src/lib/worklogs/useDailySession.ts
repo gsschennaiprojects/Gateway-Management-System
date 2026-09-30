@@ -1,5 +1,24 @@
 'use client';
 
+/**
+ * Daily Session & Attendance Lifecycle Hook
+ *
+ * PURPOSE:
+ * Orchestrates real-time daily worklog tracking, live elapsed working time
+ * computation, task deliverable state, and punch-out validation.
+ *
+ * DATA AUTHORITY & PERSISTENCE:
+ * - Authoritative Storage: Cloud Firestore (`daily_worklogs` collection) via
+ *   `POST /api/worklogs` and `GET /api/worklogs?today=true`.
+ * - Zero Browser Management Storage: All session data is fetched dynamically
+ *   from Firestore; no management data is stored in `localStorage`.
+ *
+ * CONNECTIONS:
+ * - Worklog Page: `apps/web/src/app/(dashboard)/worklog/page.tsx`
+ * - Attendance Gauge: `apps/web/src/components/ui/AttendanceGauge.tsx`
+ * - Punch-Out Dialog: `apps/web/src/components/worklog/PunchOutConfirmationModal.tsx`
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {

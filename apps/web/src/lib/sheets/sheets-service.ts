@@ -1,11 +1,22 @@
 /**
- * ============================================================================
- * GSS — GOOGLE SHEETS API SERVICE (Server-Side Only)
- * Rate-limited CRUD operations for per-employee and common sheets.
- * 
- * This service runs ONLY on the server (Next.js API routes / Server Actions).
- * It uses the Service Account credentials for authentication.
- * ============================================================================
+ * Google Sheets Operational Projection Service (Server-Side Only)
+ *
+ * PURPOSE:
+ * Bridges canonical Cloud Firestore operational records to branch-specific Google
+ * Spreadsheets for external human review, legacy audit, and monthly reporting.
+ *
+ * ARCHITECTURAL ROLE:
+ * - Data Authority: Cloud Firestore is the sole canonical transactional database.
+ * - Projection Layer: Google Sheets acts as an asynchronous read/audit mirror.
+ * - Resilience: Failures in Google Sheets API calls are queued as projection jobs
+ *   in `projection_jobs` collection and do NOT fail primary Firestore transactions.
+ * - Authentication: Authenticates via Google Cloud IAM Service Account with private key.
+ *
+ * SPREADSHEETS MANAGED (1 PER BRANCH):
+ * - Coimbatore: `SPREADSHEET_ID_CBE`
+ * - Chennai: `SPREADSHEET_ID_CHN`
+ * - Madurai: `SPREADSHEET_ID_MDU`
+ * - Erode: `SPREADSHEET_ID_ERD`
  */
 
 import { google, type sheets_v4 } from 'googleapis';

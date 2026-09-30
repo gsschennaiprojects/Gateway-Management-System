@@ -1,5 +1,31 @@
+/**
+ * Student Domain Model & Tenure Computation Utilities
+ *
+ * PURPOSE:
+ * Represents enrolled students undergoing internships, industrial training,
+ * and academic projects at Gateway Software Solutions.
+ *
+ * DATA AUTHORITY:
+ * Cloud Firestore (`students` collection) is the canonical authority.
+ *
+ * CONNECTIONS & PROJECTIONS:
+ * - Student Directory UI: `apps/web/src/app/(dashboard)/students/page.tsx`
+ * - Assigned Mentor UI: `apps/web/src/app/(dashboard)/my-students/page.tsx`
+ * - Google Sheets Projections:
+ *   1. Per-Staff Student Tab: `STU_<mentorStaffId>`
+ *   2. Central Branch Directory: `06_Student_Directory`
+ *   3. Monthly Attendance Tracker: `ATT_<mentorStaffId>`
+ *
+ * BUSINESS CONSTRAINTS:
+ * - Every student must be affiliated with exactly one regional Branch.
+ * - Attendance days are tracked per calendar day of the active month (1..31).
+ */
+
 import { Branch } from './auth';
 
+/**
+ * Canonical Student Record.
+ */
 export interface Student {
   id: string;
   name: string;

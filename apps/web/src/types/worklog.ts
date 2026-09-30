@@ -1,3 +1,23 @@
+/**
+ * Daily Worklog & Attendance Domain Models
+ *
+ * PURPOSE:
+ * Tracks daily staff and intern attendance, punch-in/out timestamps, planned tasks,
+ * completed deliverables, and monthly operational summaries.
+ *
+ * WORKFLOW:
+ * 1. Punch In: Records arrival timestamp (`loginTime`), initializing planned tasks.
+ * 2. Save Progress: Mid-day updates to task bullet points.
+ * 3. Punch Out: Finalizes `logoutTime`, calculates `hoursLogged`, and requires an
+ *    incomplete reason if planned deliverables remain uncompleted.
+ *
+ * DATA AUTHORITY:
+ * Cloud Firestore (`daily_worklogs` collection).
+ *
+ * PROJECTIONS:
+ * Synchronized to the per-staff `WL_<staffId>` tab and central `04_Staff_Attendance` tab.
+ */
+
 import { UserRole, Branch } from './auth';
 
 export interface WorkLogEntry {

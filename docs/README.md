@@ -18,8 +18,12 @@ This documentation portal provides comprehensive architectural specifications, d
 
 ```
 docs/
+├── code-architecture/
+│   └── README.md                      — Code layers, module connections & architectural rules
+├── data-flow/
+│   └── README.md                      — End-to-end data flows & complete data lineage matrix
 ├── architecture/
-│   ├── system-architecture.md         — System architecture & data flow
+│   ├── system-architecture.md         — System architecture & high-level component topologies
 │   ├── design-system.md               — UI design tokens, glassmorphism & visual styling
 │   └── implementation-roadmap.md      — Architectural evolution & milestones
 │

@@ -1,5 +1,19 @@
 'use client';
 
+/**
+ * Enterprise Document & Spreadsheet Export Service
+ *
+ * PURPOSE:
+ * Generates professionally styled, brand-compliant Microsoft Excel (.xlsx) and
+ * Word (.docx) export documents directly in the client browser.
+ *
+ * ARCHITECTURAL CONNECTIONS:
+ * - Consumed by: Students, Tasks, Worklogs, Reports, Admin Directory,
+ *   Attendance, and Leads dashboard modules.
+ * - Formats: SheetJS (XLSX) styling and python-docx style XML formatting.
+ * - Security: Sanitizes cell inputs against formula injection (=, +, -, @).
+ */
+
 import * as XLSX from 'xlsx';
 import {
   Document,

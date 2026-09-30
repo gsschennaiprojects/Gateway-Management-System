@@ -1,8 +1,22 @@
 /**
- * ============================================================================
- * GATEWAY SOFTWARE SOLUTIONS (GSS) — FIREBASE ADMIN SDK
- * Server-side privileged Firestore & Auth integration
- * ============================================================================
+ * Enterprise Privileged Firebase Admin & Cloud Firestore Service
+ *
+ * PURPOSE:
+ * Server-side authoritative data access layer executing privileged Firestore,
+ * Firebase Auth, and background projection queue mutations.
+ *
+ * DATA AUTHORITY:
+ * Cloud Firestore is the canonical, transactional source of truth for:
+ * - `users`: Staff identity, roles, and status.
+ * - `students`: Enrolled interns/students and daily calendar attendance.
+ * - `tasks`: Task assignments, group broadcasts, and lifecycle status.
+ * - `daily_worklogs`: Punch-in/out timestamps and completed deliverables.
+ * - `audit_logs`: Immutable security and administrative audit trail.
+ * - `projection_jobs`: Asynchronous jobs queued for Google Sheets mirroring.
+ *
+ * SECURITY:
+ * Runs strictly in server-side Next.js route handlers. Never imported or
+ * exposed to browser client bundles.
  */
 
 import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/app';
@@ -138,7 +152,10 @@ function loadServiceAccountKey(): FirebaseServiceAccount | null {
           keyContent = fs.readFileSync(/*turbopackIgnore: true*/ p, 'utf-8');
           break;
         }
-      } catch {}
+      } catch {
+        // Intentionally silent: in restricted serverless runtimes (e.g. AWS Lambda / Vercel Edge),
+        // filesystem probe may throw EACCES; fallback to environment variable parsing.
+      }
     }
   }
 
@@ -193,7 +210,10 @@ export function getAdminFirestore(): Firestore | null {
   adminDb = getFirestore(app);
   try {
     adminDb.settings({ ignoreUndefinedProperties: true });
-  } catch {}
+  } catch {
+    // Intentionally silent: settings() throws if Firestore has already been initialized
+    // in another Next.js worker or warm serverless instance.
+  }
   return adminDb;
 }
 
