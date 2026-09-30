@@ -8,6 +8,7 @@
     "build": "npm run build --prefix apps/web",
     "start": "npm run start --prefix apps/web",
     "lint": "npm run lint --prefix apps/web",
+    "typecheck": "npm run typecheck --prefix apps/web",
     "test": "npm run test --prefix apps/web",
     "test:unit": "npm run test:unit --prefix apps/web",
     "test:e2e": "npm run test:e2e --prefix apps/web",

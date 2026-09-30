@@ -124,7 +124,7 @@ async function main() {
   console.log('3️⃣  ENSURING PER-EMPLOYEE SUB-SHEETS EXIST (WL_, STU_, TSK_)...');
   const { execSync } = require('child_process');
   try {
-    const output = execSync('node initialize-branches.js --branch CBE --sync', {
+    const output = execSync('node scripts/initialize-branches.js --branch CBE --sync', {
       cwd: path.join(__dirname, '..'),
       encoding: 'utf-8'
     });

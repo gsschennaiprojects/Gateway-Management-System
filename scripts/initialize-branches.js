@@ -28,7 +28,10 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const SERVICE_ACCOUNT_KEY_PATH = path.join(__dirname, 'management-system-509313-306faa5b0c5e.json');
+let SERVICE_ACCOUNT_KEY_PATH = path.join(__dirname, 'management-system-509313-306faa5b0c5e.json');
+if (!fs.existsSync(SERVICE_ACCOUNT_KEY_PATH)) {
+  SERVICE_ACCOUNT_KEY_PATH = path.join(__dirname, '..', 'management-system-509313-306faa5b0c5e.json');
+}
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
 // ─── CLI Arguments ─────────────────────────────────────────────────────────────

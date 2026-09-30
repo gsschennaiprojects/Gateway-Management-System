@@ -10,7 +10,13 @@ const fs = require('fs');
 
 let keyPath = path.join(__dirname, 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json');
 if (!fs.existsSync(keyPath)) {
+  keyPath = path.join(__dirname, '..', 'gss-management-system-eef75-firebase-adminsdk-fbsvc-0b53db1b95.json');
+}
+if (!fs.existsSync(keyPath)) {
   keyPath = path.join(__dirname, 'firebase-admin-key.json');
+}
+if (!fs.existsSync(keyPath)) {
+  keyPath = path.join(__dirname, '..', 'firebase-admin-key.json');
 }
 if (!fs.existsSync(keyPath)) {
   console.error('❌ Service account key not found at:', keyPath);
@@ -20,7 +26,10 @@ if (!fs.existsSync(keyPath)) {
 const serviceAccount = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
 
 const { createRequire } = require('module');
-const webRequire = createRequire(path.join(__dirname, 'apps', 'web', 'package.json'));
+const packageJsonPath = fs.existsSync(path.join(__dirname, 'apps', 'web', 'package.json'))
+  ? path.join(__dirname, 'apps', 'web', 'package.json')
+  : path.join(__dirname, '..', 'apps', 'web', 'package.json');
+const webRequire = createRequire(packageJsonPath);
 
 const { initializeApp, cert, getApps } = webRequire('firebase-admin/app');
 const { getFirestore, FieldValue } = webRequire('firebase-admin/firestore');

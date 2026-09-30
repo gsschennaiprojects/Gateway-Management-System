@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFirestoreUserByIdentifier } from '@/lib/firebase/firebase-admin';
+import { getFirestoreUserByIdentifier, type UserAuthRecord } from '@/lib/firebase/firebase-admin';
 import { setSessionCookie } from '@/lib/auth/session';
 import { checkLoginRateLimit } from '@/lib/auth/login-rate-limit';
 import { verifyPassword, hashPassword } from '@/lib/auth/password';
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     // 2. Fallback to in-memory user-store if Firestore is unreachable
     if (!profile) {
       const { findUserByIdentifier } = await import('@/lib/auth/user-store');
-      profile = findUserByIdentifier(identifier.trim()) as any;
+      profile = findUserByIdentifier(identifier.trim()) as UserAuthRecord | null;
     }
 
     if (!profile || !profile.email) {
@@ -58,8 +58,8 @@ export async function POST(request: NextRequest) {
     if (profile.passwordHash) {
       check = verifyPassword(password, profile.passwordHash);
     }
-    if (!check.valid && (profile as any).password) {
-      check = verifyPassword(password, (profile as any).password);
+    if (!check.valid && profile.password) {
+      check = verifyPassword(password, profile.password);
     }
 
     if (!check.valid) {
