@@ -33,6 +33,7 @@ blob-report/
 .env
 .env.production
 .env.staging
+.env.vercel
 !.env.example
 !apps/web/.env.example
 *.pem
