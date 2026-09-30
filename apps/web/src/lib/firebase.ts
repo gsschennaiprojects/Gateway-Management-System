@@ -7,7 +7,7 @@
 
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { initializeFirestore, memoryLocalCache, getFirestore, type Firestore } from 'firebase/firestore';
 import { getAnalytics, type Analytics, isSupported } from 'firebase/analytics';
 
 // ─── Firebase Configuration ────────────────────────────────────────────────────
@@ -53,11 +53,19 @@ function getFirebaseAuth(): Auth {
 
 /**
  * Get Cloud Firestore instance.
- * Used for real-time user profiles, task metadata, and student records.
+ * Uses ephemeral memory-only cache to guarantee that management business data
+ * is never stored persistently in browser storage (IndexedDB/disk).
  */
 function getFirestoreDb(): Firestore {
   if (!db) {
-    db = getFirestore(getFirebaseApp());
+    const app = getFirebaseApp();
+    try {
+      db = initializeFirestore(app, {
+        localCache: memoryLocalCache(),
+      });
+    } catch {
+      db = getFirestore(app);
+    }
   }
   return db;
 }

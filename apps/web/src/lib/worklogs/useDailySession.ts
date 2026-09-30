@@ -54,14 +54,14 @@ export function useDailySession() {
 
   const storageKey = user ? `${SESSION_STORAGE_KEY_PREFIX}${user.id}_${liveDate.isoDate}` : null;
 
-  // Broadcast state changes across components & tabs
+  // Broadcast in-memory state changes across components within active session
   const broadcastSync = useCallback((payload: Partial<DailySessionState>) => {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(SYNC_EVENT_NAME, { detail: payload }));
     }
   }, []);
 
-  // Update live clock every minute
+  // Update live clock every 15 seconds
   useEffect(() => {
     const timer = setInterval(() => {
       const nowInfo = getLiveDateInfo();
@@ -69,7 +69,7 @@ export function useDailySession() {
       if (loginTime && !logoutTime) {
         setElapsedTime(calculateLiveElapsedWorkingTime(loginTime));
       }
-    }, 15000); // 15 sec refresh
+    }, 15000);
     return () => clearInterval(timer);
   }, [loginTime, logoutTime]);
 
@@ -88,39 +88,21 @@ export function useDailySession() {
     }
   }, [loginTime, logoutTime]);
 
-  // Load from API and localStorage
+  // Load authoritative session state from Firestore via server API
   const loadSession = useCallback(async () => {
     if (!user) return;
     setLoading(true);
 
-    // 1. Check local cache first for instant rendering
+    // Purge any legacy browser storage cache to prevent stale data poisoning
     if (storageKey && typeof window !== 'undefined') {
-      const cached = localStorage.getItem(storageKey);
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (parsed.explicitPunch && parsed.loginTime) {
-            setLoginTime(parsed.loginTime);
-            setIsPunchedIn(true);
-          } else {
-            setLoginTime('');
-            setIsPunchedIn(false);
-          }
-          if (parsed.explicitPunch && parsed.logoutTime) {
-            setLogoutTime(parsed.logoutTime);
-            setIsPunchedOut(true);
-          }
-          if (Array.isArray(parsed.plannedTasks)) setPlannedTasks(parsed.plannedTasks);
-          if (Array.isArray(parsed.completedTasks)) setCompletedTasks(parsed.completedTasks);
-          if (parsed.incompleteReason) setIncompleteReason(parsed.incompleteReason);
-          if (parsed.totalHours) setTotalHours(parsed.totalHours);
-        } catch {
-          // ignore cache parse error
-        }
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        // ignore storage access errors
       }
     }
 
-    // 2. Fetch authoritative state from /api/worklogs
+    // Fetch authoritative state from /api/worklogs
     try {
       const res = await fetch(`/api/worklogs?today=true&targetUserId=${user.id}`);
       if (res.ok) {
@@ -152,24 +134,8 @@ export function useDailySession() {
           } else if (log.hoursLogged) {
             setTotalHours(String(log.hoursLogged));
           }
-
-          // Sync local storage
-          if (storageKey && typeof window !== 'undefined') {
-            localStorage.setItem(
-              storageKey,
-              JSON.stringify({
-                loginTime: log.loginTime || '',
-                logoutTime: log.logoutTime || '',
-                plannedTasks: parsedPlanned,
-                completedTasks: parsedCompleted,
-                incompleteReason: log.incompleteReason || '',
-                totalHours: String(log.totalHours || log.hoursLogged || ''),
-                explicitPunch: !!log.loginTime,
-              })
-            );
-          }
         } else {
-          // Do NOT auto-punch on login. Staff will explicitly click the Punch In button to start work.
+          // Do NOT auto-punch on login. Staff explicitly clicks Punch In.
           setIsPunchedIn(false);
           setLoginTime('');
           setLogoutTime('');
@@ -215,27 +181,6 @@ export function useDailySession() {
     }
   }, []);
 
-  // Update localStorage when state changes
-  const updateLocalStorage = useCallback(
-    (updates: {
-      loginTime?: string;
-      logoutTime?: string;
-      plannedTasks?: string[];
-      completedTasks?: string[];
-      incompleteReason?: string;
-      totalHours?: string;
-      explicitPunch?: boolean;
-    }) => {
-      if (storageKey && typeof window !== 'undefined') {
-        const current = localStorage.getItem(storageKey);
-        const parsed = current ? JSON.parse(current) : {};
-        const merged = { ...parsed, ...updates };
-        localStorage.setItem(storageKey, JSON.stringify(merged));
-      }
-    },
-    [storageKey]
-  );
-
   // ── Action: Punch In / Log In (Start Day) ──────────────────────────────────
   const punchIn = useCallback(
     async (customTime?: string): Promise<boolean> => {
@@ -273,7 +218,6 @@ export function useDailySession() {
         setIsPunchedIn(true);
         setSuccess(`Logged in successfully at ${recordedLoginTime}. Planned tasks saved.`);
 
-        updateLocalStorage({ loginTime: recordedLoginTime, plannedTasks: validPlanned, explicitPunch: true });
         broadcastSync({ loginTime: recordedLoginTime, isPunchedIn: true, plannedTasks: validPlanned });
         return true;
       } catch (e) {
@@ -282,7 +226,7 @@ export function useDailySession() {
         return false;
       }
     },
-    [plannedTasks, updateLocalStorage, broadcastSync]
+    [plannedTasks, broadcastSync]
   );
 
   // ── Action: Punch Out / Log Out (End Day) ──────────────────────────────────
@@ -338,12 +282,6 @@ export function useDailySession() {
         setTotalHours(formattedTotal);
         setSuccess(`Logged out successfully at ${timeToSet}. Total work duration: ${formattedTotal}`);
 
-        updateLocalStorage({
-          logoutTime: recordedLogoutTime,
-          completedTasks: validCompleted,
-          incompleteReason: incompleteReason.trim(),
-          totalHours: formattedTotal,
-        });
         broadcastSync({
           logoutTime: recordedLogoutTime,
           isPunchedOut: true,
@@ -358,7 +296,7 @@ export function useDailySession() {
         return false;
       }
     },
-    [loginTime, plannedTasks, completedTasks, incompleteReason, updateLocalStorage, broadcastSync]
+    [loginTime, plannedTasks, completedTasks, incompleteReason, broadcastSync]
   );
 
   // ── Step 1 of 2: Request Punch Out (Validates and opens confirmation modal) ─
@@ -407,7 +345,11 @@ export function useDailySession() {
     setElapsedTime(null);
 
     if (storageKey && typeof window !== 'undefined') {
-      localStorage.removeItem(storageKey);
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        // ignore
+      }
     }
     broadcastSync({
       loginTime: '',
@@ -453,15 +395,6 @@ export function useDailySession() {
     const workingCalc = calculateWorkingTime(loginTime, logoutTime);
     const computedHours = workingCalc ? workingCalc.decimalHours.toFixed(2) : totalHours || '8.5';
 
-    updateLocalStorage({
-      loginTime,
-      logoutTime,
-      plannedTasks: validPlanned,
-      completedTasks: validCompleted,
-      incompleteReason,
-      totalHours: computedHours,
-    });
-
     broadcastSync({
       loginTime,
       logoutTime,
@@ -474,14 +407,15 @@ export function useDailySession() {
     try {
       if (loginTime && !logoutTime) {
         const res = await fetch('/api/worklogs', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'save', plannedTasks: validPlanned }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to save worklog.');
-        setSuccess('Worklog changes saved to the daily record.');
+        setSuccess('Worklog changes saved to the daily record in Firestore.');
       } else if (!loginTime) {
-        setSuccess('Draft saved on this device. The daily record is created when you punch in.');
+        setError('Please punch in with your planned tasks to record today\'s worklog in the database.');
       } else {
         setSuccess('This worklog is closed. Its recorded values were not changed.');
       }
@@ -490,25 +424,23 @@ export function useDailySession() {
     } finally {
       setSaving(false);
     }
-  }, [user, loginTime, logoutTime, plannedTasks, completedTasks, incompleteReason, totalHours, updateLocalStorage, broadcastSync]);
+  }, [user, loginTime, logoutTime, plannedTasks, completedTasks, incompleteReason, totalHours, broadcastSync]);
 
-  // Task Point Mutators
+  // Task Point Mutators (Pure ephemeral in-memory state with broadcast)
   const updatePlannedTasks = useCallback(
     (newTasks: string[]) => {
       setPlannedTasks(newTasks);
-      updateLocalStorage({ plannedTasks: newTasks });
       broadcastSync({ plannedTasks: newTasks });
     },
-    [updateLocalStorage, broadcastSync]
+    [broadcastSync]
   );
 
   const updateCompletedTasks = useCallback(
     (newTasks: string[]) => {
       setCompletedTasks(newTasks);
-      updateLocalStorage({ completedTasks: newTasks });
       broadcastSync({ completedTasks: newTasks });
     },
-    [updateLocalStorage, broadcastSync]
+    [broadcastSync]
   );
 
   const workingCalc = calculateWorkingTime(loginTime, logoutTime);
@@ -518,13 +450,11 @@ export function useDailySession() {
     loginTime,
     setLoginTime: (t: string) => {
       setLoginTime(t);
-      updateLocalStorage({ loginTime: t });
       broadcastSync({ loginTime: t });
     },
     logoutTime,
     setLogoutTime: (t: string) => {
       setLogoutTime(t);
-      updateLocalStorage({ logoutTime: t });
       broadcastSync({ logoutTime: t });
     },
     isPunchedIn,
