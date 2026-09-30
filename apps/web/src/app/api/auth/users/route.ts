@@ -6,6 +6,7 @@ import { canDeleteUser, canManageTargetUser } from '@/lib/rbac/permissions';
 import { BRANCHES, type UserRole, type UserStatus } from '@/types/auth';
 import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
+import { hashPassword } from '@/lib/auth/password';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +18,17 @@ export async function GET(request: NextRequest) {
     const users = await getFirestoreUsers();
     const { searchParams } = new URL(request.url);
     const branchFilter = searchParams.get('branch');
-    const scoped = session.user.role === 'superadmin'
+    const isSuperAdmin = session.user.role === 'superadmin';
+    const scoped = (isSuperAdmin
       ? users.filter(user => !branchFilter || ['All', 'all'].includes(branchFilter) || user.branch === branchFilter)
-      : users.filter(user => user.branch === session.user.branch);
+      : users.filter(user => user.branch === session.user.branch)
+    ).map(user => {
+      const { passwordHash, ...rest } = user;
+      if (!isSuperAdmin) {
+        delete (rest as Partial<typeof user>).password;
+      }
+      return rest;
+    });
     return NextResponse.json({ users: scoped });
   } catch {
     return NextResponse.json({ error: 'User directory is temporarily unavailable.' }, { status: 503 });
@@ -36,14 +45,19 @@ export async function PATCH(request: NextRequest) {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
     const input = body as Record<string, unknown>;
-    if (Object.hasOwn(input, 'password') || Object.hasOwn(input, 'passwordHash')) return NextResponse.json({ error: 'Use Firebase password reset to change credentials.' }, { status: 400 });
+    if (Object.hasOwn(input, 'passwordHash')) {
+      return NextResponse.json({ error: 'Direct password hash modification is not allowed.' }, { status: 400 });
+    }
+    if (Object.hasOwn(input, 'password') && input.action !== 'edit_staff') {
+      return NextResponse.json({ error: 'Password updates are only allowed via staff profile edit.' }, { status: 400 });
+    }
     if (typeof input.userId !== 'string' || input.userId.length > 150 || typeof input.action !== 'string') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
     if (input.action === 'update_role' && session.user.role !== 'superadmin') return NextResponse.json({ error: 'Only Super Admin can assign roles.' }, { status: 403 });
     if (input.action === 'edit_staff' && session.user.role !== 'superadmin') return NextResponse.json({ error: 'Only Super Admin can edit staff profiles.' }, { status: 403 });
     const db = getAdminFirestore();
     const auth = getAdminAuth();
     if (!db) {
-      const { updateUserStatus, updateUserRole, findUserById } = await import('@/lib/auth/user-store');
+      const { updateUserStatus, updateUserRole, findUserById, upsertServerUser } = await import('@/lib/auth/user-store');
       const memUser = findUserById(input.userId);
       if (!memUser) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
       if (input.action === 'update_status') {
@@ -52,6 +66,24 @@ export async function PATCH(request: NextRequest) {
       }
       if (input.action === 'update_role') {
         const updated = updateUserRole(input.userId, input.role as UserRole);
+        return NextResponse.json({ success: true, user: updated });
+      }
+      if (input.action === 'edit_staff') {
+        const memUpdates: Record<string, unknown> = {};
+        if (typeof input.name === 'string') memUpdates.name = input.name;
+        if (typeof input.email === 'string') memUpdates.email = input.email;
+        if (typeof input.mobile === 'string') memUpdates.mobile = input.mobile;
+        if (typeof input.branch === 'string') memUpdates.branch = input.branch;
+        if (typeof input.role === 'string') memUpdates.role = input.role;
+        if (typeof input.status === 'string') memUpdates.status = input.status;
+        if (typeof input.specialization === 'string') memUpdates.specialization = input.specialization;
+        if (Array.isArray(input.specializations)) memUpdates.specializations = input.specializations;
+        if (typeof input.majorSpecialization === 'string') memUpdates.majorSpecialization = input.majorSpecialization;
+        if (typeof input.password === 'string' && input.password.trim()) {
+          memUpdates.password = input.password.trim();
+          memUpdates.passwordHash = hashPassword(input.password.trim());
+        }
+        const updated = upsertServerUser({ ...memUser, ...memUpdates } as any);
         return NextResponse.json({ success: true, user: updated });
       }
       return NextResponse.json({ error: 'User service is unavailable.' }, { status: 503 });
@@ -96,6 +128,35 @@ export async function PATCH(request: NextRequest) {
           : field === 'mobile' ? `+91${String(input[field]).replace(/\D/g, '').slice(-10)}`
           : typeof input[field] === 'string' ? input[field].trim() : input[field];
       }
+      if (Array.isArray(input.specializations)) {
+        const validSpecs = (input.specializations as unknown[])
+          .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+          .map(s => s.trim());
+        if (validSpecs.length > 0) {
+          const major = typeof input.majorSpecialization === 'string' && input.majorSpecialization.trim()
+            ? input.majorSpecialization.trim()
+            : validSpecs[0];
+          const additionals = validSpecs.filter(s => s !== major);
+          updates.specializations = validSpecs;
+          updates.majorSpecialization = major;
+          updates.additionalSpecializations = additionals;
+          updates.specialization = major;
+        }
+      } else if (typeof input.majorSpecialization === 'string' && input.majorSpecialization.trim()) {
+        const major = input.majorSpecialization.trim();
+        updates.majorSpecialization = major;
+        updates.specialization = major;
+      }
+
+      if (typeof input.password === 'string' && input.password.trim().length > 0) {
+        const rawPass = input.password.trim();
+        if (rawPass.length < 6) {
+          return NextResponse.json({ error: 'Password must be at least 6 characters.' }, { status: 400 });
+        }
+        updates.password = rawPass;
+        updates.passwordHash = hashPassword(rawPass);
+      }
+
       if (input.role !== undefined) {
         if (!['superadmin', 'admin', 'hr', 'employee', 'intern'].includes(String(input.role))) return NextResponse.json({ error: 'Invalid role.' }, { status: 400 });
         nextRole = input.role as UserRole; updates.role = nextRole;
@@ -131,10 +192,11 @@ export async function PATCH(request: NextRequest) {
       authBefore = null;
     }
 
-    const authUpdates = {
+    const authUpdates: Record<string, unknown> = {
       ...(updates.email ? { email: String(updates.email) } : {}),
       ...(updates.mobile ? { phoneNumber: String(updates.mobile) } : {}),
       ...(updates.status ? { disabled: nextStatus !== 'active' } : {}),
+      ...(updates.password ? { password: String(updates.password) } : {}),
     };
     if (auth && authBefore && Object.keys(authUpdates).length) {
       try {

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { useAuth } from '@/context/AuthContext';
-import { User, UserRole, UserStatus, Branch, BRANCHES } from '@/types/auth';
+import { User, UserRole, UserStatus, Branch, BRANCHES, DEFAULT_DOMAINS } from '@/types/auth';
 import { canDeleteUser } from '@/lib/rbac/permissions';
 import {
   ShieldAlert,
@@ -25,6 +25,7 @@ import {
   Eye,
   EyeOff,
   Key,
+  Plus,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
 
@@ -53,9 +54,13 @@ export default function UserManagementPage() {
     role: 'employee' as UserRole,
     status: 'active' as UserStatus,
     specialization: '',
+    specializations: [] as string[],
+    majorSpecialization: '',
     password: '',
   });
-  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>(['Gen AI']);
+  const [customDomainInput, setCustomDomainInput] = useState('');
+  const [showEditPassword, setShowEditPassword] = useState(true);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -102,6 +107,14 @@ export default function UserManagementPage() {
   const openEditStaffModal = (user: User) => {
     setSelectedUser(user);
     setModalAction('edit_staff');
+    const userSpecs = Array.isArray(user.specializations) && user.specializations.length > 0
+      ? user.specializations
+      : (user.specialization ? [user.specialization] : ['Gen AI']);
+    const major = user.majorSpecialization || user.specialization || userSpecs[0] || 'Gen AI';
+    const ordered = [major, ...userSpecs.filter((s) => s !== major)];
+
+    setSelectedDomains(ordered);
+    setCustomDomainInput('');
     setEditFormData({
       name: user.name || '',
       email: user.email || '',
@@ -109,11 +122,67 @@ export default function UserManagementPage() {
       branch: (user.branch as Branch) || 'Coimbatore',
       role: user.role,
       status: user.status,
-      specialization: user.specialization || '',
-      password: '',
+      specialization: major,
+      specializations: ordered,
+      majorSpecialization: major,
+      password: user.password || '',
     });
-    setShowEditPassword(false);
+    setShowEditPassword(true);
     setActionError(null);
+  };
+
+  const toggleDomain = (domain: string) => {
+    let next: string[];
+    if (selectedDomains.includes(domain)) {
+      if (selectedDomains.length <= 1) return;
+      next = selectedDomains.filter((d) => d !== domain);
+    } else {
+      next = [...selectedDomains, domain];
+    }
+    setSelectedDomains(next);
+    setEditFormData((prev) => ({
+      ...prev,
+      specializations: next,
+      specialization: next[0] || '',
+      majorSpecialization: next[0] || '',
+    }));
+  };
+
+  const makeMajor = (domain: string) => {
+    const next = [domain, ...selectedDomains.filter((d) => d !== domain)];
+    setSelectedDomains(next);
+    setEditFormData((prev) => ({
+      ...prev,
+      specializations: next,
+      specialization: domain,
+      majorSpecialization: domain,
+    }));
+  };
+
+  const removeDomain = (domain: string) => {
+    if (selectedDomains.length <= 1) return;
+    const next = selectedDomains.filter((d) => d !== domain);
+    setSelectedDomains(next);
+    setEditFormData((prev) => ({
+      ...prev,
+      specializations: next,
+      specialization: next[0] || '',
+      majorSpecialization: next[0] || '',
+    }));
+  };
+
+  const addCustomDomain = () => {
+    const trimmed = customDomainInput.trim();
+    if (!trimmed || selectedDomains.includes(trimmed)) return;
+    const next = [...selectedDomains, trimmed];
+    setSelectedDomains(next);
+    setCustomDomainInput('');
+    setEditFormData((prev) => ({
+      ...prev,
+      specializations: next,
+      specialization: prev.specialization || next[0] || '',
+      majorSpecialization: prev.majorSpecialization || next[0] || '',
+    }));
   };
 
   const handleEditStaffSubmit = async (e: React.FormEvent) => {
@@ -130,6 +199,9 @@ export default function UserManagementPage() {
           userId: selectedUser.id,
           action: 'edit_staff',
           ...editFormData,
+          specializations: selectedDomains,
+          majorSpecialization: selectedDomains[0] || editFormData.specialization || 'Gen AI',
+          specialization: selectedDomains[0] || editFormData.specialization || 'Gen AI',
         }),
       });
 
@@ -201,6 +273,7 @@ export default function UserManagementPage() {
     setModalAction(null);
     setConfirmPhrase('');
     setActionError(null);
+    setCustomDomainInput('');
   };
 
   const isSuperAdmin = currentUser?.role === 'superadmin';
@@ -503,10 +576,23 @@ export default function UserManagementPage() {
 
                     {/* Specialization Badges */}
                     <td className="py-3.5 px-4 text-xs">
-                      {u.specialization ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[var(--badge-warning-bg)] text-[var(--badge-warning-text)] border border-[var(--badge-warning-border)] text-xs font-medium">
-                          ★ {u.majorSpecialization || (u.specializations && u.specializations[0]) || u.specialization}
-                        </span>
+                      {u.specialization || (u.specializations && u.specializations.length > 0) ? (
+                        <div className="flex flex-wrap items-center gap-1 max-w-xs">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[var(--badge-warning-bg)] text-[var(--badge-warning-text)] border border-[var(--badge-warning-border)] text-xs font-semibold shadow-2xs">
+                            ★ {u.majorSpecialization || (u.specializations && u.specializations[0]) || u.specialization}
+                          </span>
+                          {u.specializations && u.specializations.length > 1 &&
+                            u.specializations
+                              .filter((s) => s !== (u.majorSpecialization || (u.specializations && u.specializations[0]) || u.specialization))
+                              .map((s) => (
+                                <span
+                                  key={s}
+                                  className="inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--bg-card-subtle)] text-[var(--text-secondary)] border border-[var(--border-card)] text-[11px]"
+                                >
+                                  {s}
+                                </span>
+                              ))}
+                        </div>
                       ) : (
                         <span className="text-[var(--text-muted)]">—</span>
                       )}
@@ -696,26 +782,125 @@ export default function UserManagementPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block font-medium text-[var(--text-secondary)] mb-1">Domain / Specialization</label>
-                <input
-                  type="text"
-                  value={editFormData.specialization}
-                  onChange={(e) => setEditFormData({ ...editFormData, specialization: e.target.value })}
-                  className="w-full h-10 px-3 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand-primary)]"
-                />
+              {/* Domain / Specialization with Major obvious badge and oval pills */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)]">
+                    Domain / Specialization
+                  </label>
+                  <span className="text-[11px] text-[var(--brand-primary)] font-medium">
+                    {selectedDomains.length} selected
+                  </span>
+                </div>
+
+                {/* Active Selected Oval Pills */}
+                <div className="flex flex-wrap gap-1.5 min-h-[38px] p-2.5 rounded-xl bg-[var(--bg-card-subtle)] border border-[var(--border-card)]">
+                  {selectedDomains.map((dom, index) => {
+                    const isMajor = index === 0;
+                    return (
+                      <span
+                        key={dom}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                          isMajor
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/40 shadow-xs'
+                            : 'bg-[var(--bg-card)] text-[var(--text-secondary)] border border-[var(--border-card)]'
+                        }`}
+                      >
+                        {isMajor && (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded-full bg-amber-500/25 text-[10px] uppercase font-bold text-amber-800 dark:text-amber-300">
+                            ★ Major
+                          </span>
+                        )}
+                        <span>{dom}</span>
+                        {!isMajor && (
+                          <button
+                            type="button"
+                            onClick={() => makeMajor(dom)}
+                            className="text-[11px] text-[var(--brand-primary)] hover:underline ml-0.5 cursor-pointer font-medium"
+                            title="Promote to Major domain"
+                          >
+                            (Make Major)
+                          </button>
+                        )}
+                        {selectedDomains.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeDomain(dom)}
+                            className="hover:opacity-80 p-0.5 ml-0.5 text-[var(--text-muted)] hover:text-red-500 cursor-pointer"
+                            title="Remove domain"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Domain Input */}
+                <div className="flex items-center gap-2 pt-0.5">
+                  <input
+                    type="text"
+                    placeholder="Type custom domain..."
+                    value={customDomainInput}
+                    onChange={(e) => setCustomDomainInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addCustomDomain();
+                      }
+                    }}
+                    className="w-full h-9 px-3 bg-[var(--bg-card-subtle)] text-xs text-[var(--text-primary)] rounded-xl border border-[var(--border-card)] focus:border-[var(--brand-primary)] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={addCustomDomain}
+                    className="h-9 px-3.5 rounded-full bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-medium flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add</span>
+                  </button>
+                </div>
+
+                {/* Predefined Popular Domains */}
+                <div className="pt-1">
+                  <p className="text-[11px] text-[var(--text-secondary)] mb-1.5 font-medium">
+                    Popular Domains (click to toggle):
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DEFAULT_DOMAINS.map((dom) => {
+                      const isSelected = selectedDomains.includes(dom);
+                      return (
+                        <button
+                          key={dom}
+                          type="button"
+                          onClick={() => toggleDomain(dom)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-[var(--brand-container)] text-[var(--brand-primary)] border border-[var(--brand-primary)] font-semibold'
+                              : 'bg-[var(--bg-card-subtle)] text-[var(--text-secondary)] border border-[var(--border-card)] hover:bg-[var(--bg-card)]'
+                          }`}
+                        >
+                          {isSelected && <Check className="w-3 h-3 text-[var(--brand-primary)]" />}
+                          <span>{dom}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
+              {/* Staff Password with direct editing and existing password display */}
               <div>
                 <label className="block font-medium text-[var(--text-secondary)] mb-1 flex items-center justify-between">
                   <span>Staff Password</span>
                   <button
                     type="button"
                     onClick={() => setShowEditPassword(!showEditPassword)}
-                    className="text-[11px] text-[var(--brand-primary)] hover:underline flex items-center gap-1 cursor-pointer"
+                    className="text-[11px] text-[var(--brand-primary)] hover:underline flex items-center gap-1 cursor-pointer font-medium"
                   >
-                    {showEditPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                    {showEditPassword ? 'Hide' : 'Reveal'}
+                    {showEditPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    {showEditPassword ? 'Hide Password' : 'Show Password'}
                   </button>
                 </label>
                 <div className="relative">
@@ -724,12 +909,12 @@ export default function UserManagementPage() {
                     value={editFormData.password}
                     onChange={(e) => setEditFormData({ ...editFormData, password: e.target.value })}
                     placeholder="Enter or update staff password"
-                    className="w-full h-10 px-3 pr-10 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand-primary)]"
+                    className="w-full h-10 px-3 pr-10 bg-[var(--bg-card-subtle)] rounded-xl border border-[var(--border-card)] text-[var(--text-primary)] font-mono text-sm focus:outline-none focus:border-[var(--brand-primary)]"
                   />
                   <Key className="w-4 h-4 text-[var(--text-muted)] absolute right-3 top-3 pointer-events-none" />
                 </div>
                 <p className="text-[10px] text-[var(--text-muted)] mt-1">
-                  Set a new password here; existing passwords are never displayed.
+                  Existing staff password is displayed above with direct editing access. Changes save directly to system credentials.
                 </p>
               </div>
 

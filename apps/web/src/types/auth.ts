@@ -83,6 +83,7 @@ export interface User {
   endDate?: string;
   createdAt: string;
   avatarUrl?: string;
+  password?: string;
 }
 
 export interface AuthSession {

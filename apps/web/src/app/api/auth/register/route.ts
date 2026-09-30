@@ -70,7 +70,10 @@ export async function POST(request: NextRequest) {
         transaction.create(userRef, {
           uid, employeeId, name, email, gmail: email, mobile: phoneKey, role, status: 'pending',
           branch: branch as string, branchId: String(branch).toUpperCase(), specialization: specializations[0],
+          majorSpecialization: specializations[0],
+          additionalSpecializations: specializations.slice(1),
           specializations, startMonthYear: typeof input.startMonthYear === 'string' ? input.startMonthYear : now.slice(0, 7),
+          password,
           passwordHash,
           ...(typeof input.startDate === 'string' ? { startDate: input.startDate } : {}),
           ...(typeof input.endDate === 'string' ? { endDate: input.endDate } : {}), createdAt: now, updatedAt: now,
@@ -98,8 +101,11 @@ export async function POST(request: NextRequest) {
         status: 'pending',
         branch: branch as typeof BRANCHES[number],
         specialization: specializations[0],
+        majorSpecialization: specializations[0],
+        additionalSpecializations: specializations.slice(1),
         specializations,
         startMonthYear: typeof input.startMonthYear === 'string' ? input.startMonthYear : now.slice(0, 7),
+        password,
         passwordHash,
         createdAt: now,
       });
