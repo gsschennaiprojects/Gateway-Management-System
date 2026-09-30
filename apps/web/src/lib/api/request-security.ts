@@ -46,6 +46,20 @@ export function isSameOriginRequest(request: Request): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return false;
 
+  // 0. In non-production environments (development / local test), permit same-origin and localhost
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const reqOrigin = new URL(request.url).origin;
+      if (origin === reqOrigin) return true;
+      const originUrl = new URL(origin);
+      if (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1') {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   const allowedOrigins = new Set<string>();
 
   // 1. Explicitly configured URLs

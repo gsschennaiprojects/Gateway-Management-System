@@ -12,33 +12,79 @@ import {
   FileText,
   Loader2,
   Printer,
+  Building2,
+  AlertCircle,
+  Clock,
+  Sparkles,
+  RotateCcw,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
 import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
-import type { User } from '@/types/auth';
+import { useAuth } from '@/context/AuthContext';
+import { BRANCHES, Branch } from '@/types/auth';
 
 interface StaffAttendanceRecord {
   id: string;
   name: string;
   role: string;
+  branch?: string;
   punchInTime?: string;
   punchOutTime?: string;
   attendance: Record<number, 'present' | 'absent' | 'holiday'>;
+  lastUpdated?: string;
+  updatedBy?: {
+    id: string;
+    name: string;
+    role: string;
+  };
 }
 
 export default function AttendanceMasterGridPage() {
+  const { user: currentUser } = useAuth();
   const liveDate = useMemo(() => getLiveDateInfo(), []);
-  
-  // Selected month state (defaults to live system date)
+
+  // Selected month & year state (defaults to live system date)
   const [selectedYear, setSelectedYear] = useState<number>(liveDate.year);
   const [selectedMonth, setSelectedMonth] = useState<number>(liveDate.month); // 1-12
-  
+  const [selectedBranch, setSelectedBranch] = useState<string>('All');
+
   const [records, setRecords] = useState<StaffAttendanceRecord[]>([]);
+  const [initialSnapshot, setInitialSnapshot] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
-  const [savedNotice, setSavedNotice] = useState(false);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [downloadingFormat, setDownloadingFormat] = useState<'excel' | 'docx' | null>(null);
+
+  // Set default branch based on current user role
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'superadmin' && currentUser.branch) {
+      setSelectedBranch(currentUser.branch);
+    }
+  }, [currentUser]);
+
+  // Track if changes have been made since last load or save
+  const currentSnapshot = useMemo(() => {
+    return JSON.stringify(records.map(r => ({ id: r.id, att: r.attendance })));
+  }, [records]);
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (!initialSnapshot || loading) return false;
+    return currentSnapshot !== initialSnapshot;
+  }, [currentSnapshot, initialSnapshot, loading]);
+
+  // Warn if leaving page with unsaved edits
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   // Is viewing the current live month?
   const isCurrentLiveMonth = selectedYear === liveDate.year && selectedMonth === liveDate.month;
@@ -100,127 +146,103 @@ export default function AttendanceMasterGridPage() {
     setSelectedMonth(liveDate.month);
   };
 
-  // Fetch staff users and actual live attendance records
+  // Fetch staff users and live attendance records from Firestore
   const loadAttendanceData = useCallback(async () => {
     setLoading(true);
     setDataError(null);
     try {
-      // 1. Fetch active users
-      const usersRes = await fetch('/api/auth/users');
-      if (!usersRes.ok) throw new Error('Staff directory could not be loaded.');
-      const usersData = await usersRes.json();
-      const activeUsers = ((usersData.users || []) as User[]).filter((u) => u.status === 'active');
-
-      // 2. Fetch existing staff attendance records from sheets
-      const sheetAttMap: Record<string, Record<number, 'present' | 'absent' | 'holiday'>> = {};
-      const userPunchInfo: Record<string, { punchIn?: string; punchOut?: string }> = {};
-
-      try {
-        const attRes = await fetch('/api/sheets?type=staff_attendance');
-        if (!attRes.ok) {
-          const attError = await attRes.json().catch(() => ({}));
-          throw new Error(attError.error || 'Attendance storage is not available.');
-        }
-        {
-          const attJson = await attRes.json();
-          if (Array.isArray(attJson.data)) {
-            attJson.data.forEach((row: { staffId?: string; date?: string; status?: string; punchIn?: string; punchOut?: string; checkIn?: string; checkOut?: string }) => {
-              // row: { staffId, date, status, punchIn, punchOut }
-              if (row.staffId && row.date) {
-                const dateParts = String(row.date).split('-');
-                if (dateParts.length === 3) {
-                  const rYear = parseInt(dateParts[0], 10);
-                  const rMonth = parseInt(dateParts[1], 10);
-                  const rDay = parseInt(dateParts[2], 10);
-
-                  if (rYear === selectedYear && rMonth === selectedMonth) {
-                    if (!sheetAttMap[row.staffId]) sheetAttMap[row.staffId] = {};
-                    const st = String(row.status || '').toLowerCase();
-                    if (st.includes('present') || st.includes('punched') || row.punchIn) {
-                      sheetAttMap[row.staffId][rDay] = 'present';
-                    } else if (st.includes('absent')) {
-                      sheetAttMap[row.staffId][rDay] = 'absent';
-                    } else if (st.includes('holiday')) {
-                      sheetAttMap[row.staffId][rDay] = 'holiday';
-                    }
-
-                    if (rDay === todayDay) {
-                      userPunchInfo[row.staffId] = {
-                        punchIn: row.punchIn || row.checkIn,
-                        punchOut: row.punchOut || row.checkOut,
-                      };
-                    }
-                  }
-                }
-              }
-            });
-          }
-        }
-      } catch (attErr) {
-        throw attErr;
+      const params = new URLSearchParams({
+        year: String(selectedYear),
+        month: String(selectedMonth),
+      });
+      if (selectedBranch && selectedBranch !== 'All') {
+        params.set('branch', selectedBranch);
       }
 
-      // 3. Build staff attendance records
-      const initialRecords: StaffAttendanceRecord[] = activeUsers.map((u) => {
-        const staffAtt = sheetAttMap[u.id] || {};
-        const punches = userPunchInfo[u.id] || {};
+      const res = await fetch(`/api/admin/attendance?${params.toString()}`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Staff attendance could not be loaded from database.');
+      }
 
-        return {
-          id: u.id,
-          name: u.name,
-          role: `${u.role.toUpperCase()} (${u.specialization || u.branch || 'Operations'})`,
-          punchInTime: punches.punchIn,
-          punchOutTime: punches.punchOut,
-          attendance: staffAtt,
-        };
-      });
-
-      setRecords(initialRecords);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.records)) {
+        setRecords(data.records);
+        const snap = JSON.stringify(data.records.map((r: StaffAttendanceRecord) => ({ id: r.id, att: r.attendance })));
+        setInitialSnapshot(snap);
+        if (data.lastUpdated) {
+          setLastSavedTimestamp(data.lastUpdated);
+        }
+      } else {
+        throw new Error(data.error || 'Failed to parse attendance records.');
+      }
     } catch (err) {
       console.error('[AttendanceMaster] Error loading grid data:', err);
       setDataError(err instanceof Error ? err.message : 'Attendance data could not be loaded.');
     } finally {
       setLoading(false);
     }
-  }, [selectedYear, selectedMonth, todayDay]);
+  }, [selectedYear, selectedMonth, selectedBranch]);
 
   useEffect(() => {
     void Promise.resolve().then(loadAttendanceData);
   }, [loadAttendanceData]);
 
-  // Cycle status on cell click (Present -> Absent -> Holiday -> Present)
+  // Cycle status on cell click (unrecorded -> present -> absent -> holiday -> unrecorded)
   const cycleStatus = (recordId: string, day: number) => {
     setRecords((prev) =>
       prev.map((rec) => {
         if (rec.id !== recordId) return rec;
         const current = rec.attendance[day];
-        const next: Record<string, 'present' | 'absent' | 'holiday'> = {
+        const next: Record<string, 'present' | 'absent' | 'holiday' | undefined> = {
           unrecorded: 'present',
           present: 'absent',
           absent: 'holiday',
-          holiday: 'present',
+          holiday: undefined,
         };
+        const nextStatus = next[current || 'unrecorded'];
+        const updatedAttendance = { ...rec.attendance };
+        if (nextStatus) {
+          updatedAttendance[day] = nextStatus;
+        } else {
+          delete updatedAttendance[day];
+        }
         return {
           ...rec,
-          attendance: {
-            ...rec.attendance,
-            [day]: next[current || 'unrecorded'],
-          },
+          attendance: updatedAttendance,
         };
       })
     );
   };
 
-  // Save changes to backend
+  // Quick Action: Mark all active staff present for today
+  const handleMarkAllPresentToday = () => {
+    if (!todayDay) return;
+    setRecords((prev) =>
+      prev.map((rec) => ({
+        ...rec,
+        attendance: {
+          ...rec.attendance,
+          [todayDay]: 'present',
+        },
+      }))
+    );
+  };
+
+  // Reset to last saved state from server
+  const handleDiscardChanges = () => {
+    void loadAttendanceData();
+  };
+
+  // Save changes and overwrite in Firestore
   const handleSave = async () => {
     setSaving(true);
+    setDataError(null);
     try {
-      // Persist to sheets/attendance API
-      const response = await fetch('/api/sheets', {
+      const response = await fetch('/api/admin/attendance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'staff_attendance_bulk',
           year: selectedYear,
           month: selectedMonth,
           records: records.map((r) => ({
@@ -230,14 +252,25 @@ export default function AttendanceMasterGridPage() {
           })),
         }),
       });
-      if (!response.ok) {
-        const result = await response.json().catch(() => ({}));
-        throw new Error(result.error || 'Attendance changes could not be saved.');
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Attendance changes could not be saved to Firestore.');
       }
 
-      setSavedNotice(true);
-      setTimeout(() => setSavedNotice(false), 3000);
+      // Update snapshot to mark dirty state as clean
+      const snap = JSON.stringify(records.map(r => ({ id: r.id, att: r.attendance })));
+      setInitialSnapshot(snap);
+      const timeStr = new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      setLastSavedTimestamp(result.updatedAt || new Date().toISOString());
+      setSavedNotice(`Attendance successfully updated & overwritten in Firestore (${timeStr}). Dual-logged to Sheets.`);
+      setTimeout(() => setSavedNotice(null), 5000);
     } catch (err) {
+      console.error('[AttendanceMaster] Save error:', err);
       setDataError(err instanceof Error ? err.message : 'Attendance changes could not be saved.');
     } finally {
       setSaving(false);
@@ -251,6 +284,7 @@ export default function AttendanceMasterGridPage() {
       const headers = [
         'Staff Member',
         'Role',
+        'Branch',
         ...workingDays.map((d) => `${d.day} (${d.weekdayShort})`),
         'Total Present',
         'Attendance Rate %',
@@ -258,15 +292,16 @@ export default function AttendanceMasterGridPage() {
 
       const rows = records.map((r) => {
         const daysPresent = workingDays.filter((d) => {
-                  const st = r.attendance[d.day] || '-';
+          const st = r.attendance[d.day] || '-';
           return st === 'present';
         }).length;
 
-        const rate = Math.round((daysPresent / workingDays.length) * 100);
+        const rate = workingDays.length > 0 ? Math.round((daysPresent / workingDays.length) * 100) : 0;
 
         return [
           r.name,
           r.role,
+          r.branch || 'General',
           ...workingDays.map((d) => {
             const st = r.attendance[d.day] || '-';
             return st === 'present' ? 'P' : st === 'absent' ? 'A' : st === 'holiday' ? 'H' : '-';
@@ -280,7 +315,7 @@ export default function AttendanceMasterGridPage() {
         filename: `GSS_Staff_Attendance_Master_${currentMonthTitle.replace(/\s+/g, '_')}`,
         sheetName: 'Attendance Master',
         title: `Gateway Software Solutions — Staff Attendance Master Grid`,
-        subtitle: `${currentMonthTitle} • ${workingDays.length} Working Days (Sundays Excluded) • Staff Count: ${records.length}`,
+        subtitle: `${currentMonthTitle} • ${workingDays.length} Working Days (Sundays Excluded) • Staff Count: ${records.length} • Overwritten to Firestore`,
         headers,
         rows,
       });
@@ -298,39 +333,41 @@ export default function AttendanceMasterGridPage() {
         title: 'Staff Attendance Master Audit Record',
         subtitle: 'Monthly Staff Attendance Verification & Working Day Compliance',
         period: currentMonthTitle,
-        branch: 'Coimbatore',
-        staffName: 'Admin Operations',
-        staffRole: 'ADMIN',
+        branch: selectedBranch === 'All' ? 'All Branches' : selectedBranch,
+        staffName: currentUser?.name || 'Administrator',
+        staffRole: (currentUser?.role || 'admin').toUpperCase(),
         sections: [
           {
             heading: '1. Staff Attendance Rate Summary',
-            description: `Audited attendance percentages across all staff members for ${currentMonthTitle}.`,
+            description: `Audited attendance percentages across all staff members for ${currentMonthTitle}. Canonical source: Firestore.`,
             table: {
-              headers: ['Staff Member', 'Role', 'Working Days', 'Days Present', 'Attendance %', 'Status'],
+              headers: ['Staff Member', 'Role', 'Branch', 'Working Days', 'Days Present', 'Attendance %', 'Status'],
               rows: records.map((r) => {
                 const daysPresent = workingDays.filter((d) => {
-          const st = r.attendance[d.day] || '-';
+                  const st = r.attendance[d.day] || '-';
                   return st === 'present';
                 }).length;
-                const rate = Math.round((daysPresent / workingDays.length) * 100);
+                const rate = workingDays.length > 0 ? Math.round((daysPresent / workingDays.length) * 100) : 0;
                 return [
                   r.name,
                   r.role,
+                  r.branch || 'Operations',
                   workingDays.length,
                   daysPresent,
                   `${rate}%`,
                   rate >= 90 ? 'Compliant' : 'Review',
                 ];
               }),
-              columnWidthsPercentage: [25, 20, 15, 15, 13, 12],
+              columnWidthsPercentage: [22, 18, 14, 12, 12, 11, 11],
             },
           },
           {
             heading: '2. Audit Certification',
             bullets: [
               'All working days omit Sundays per GSS corporate calendar policies.',
-              'Verified against biometric and portal login/logout timestamps.',
-              'Archived for corporate compliance and monthly payroll processing.',
+              'Overwritten and maintained directly in Cloud Firestore staff_attendance collection.',
+              'Synchronized with Google Sheets 04_Staff_Attendance for payroll archival.',
+              `Last Saved Timestamp: ${lastSavedTimestamp || 'Live Synced'}.`,
             ],
           },
         ],
@@ -340,8 +377,10 @@ export default function AttendanceMasterGridPage() {
     }
   };
 
+  const isSuperAdmin = currentUser?.role === 'superadmin';
+
   return (
-    <div className="space-y-6 animate-panel-entrance max-w-7xl mx-auto pb-12">
+    <div className="space-y-6 animate-panel-entrance max-w-7xl mx-auto pb-16">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -351,30 +390,63 @@ export default function AttendanceMasterGridPage() {
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-semibold text-[var(--text-primary,#1F1F1F)] tracking-tight">
-                  Attendance Master Grid
+                <h1 className="text-xl sm:text-2xl font-serif font-bold text-[var(--text-primary,#1F1F1F)] tracking-tight">
+                  Staff Attendance Master Grid
                 </h1>
                 <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[var(--brand-container,#E8F0FE)] text-[var(--brand-primary,#1A73E8)] border border-[var(--border-subtle,#D2E3FC)]">
                   Live System Date: {liveDate.formattedDate}
                 </span>
+                {lastSavedTimestamp && (
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-slate-400" />
+                    Last Saved: {new Date(lastSavedTimestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-[var(--text-secondary,#444746)] mt-0.5">
-                {currentMonthTitle} working calendar — Sundays omitted per policy. Tap any cell to cycle status.
+                {currentMonthTitle} working calendar — Sundays omitted. Tap any cell to cycle status (P/A/H). Overwrites canonically to Cloud Firestore.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Action Controls */}
+        {/* Action Controls & Primary Save Button */}
         <div className="flex items-center gap-2.5 flex-wrap">
+          {hasUnsavedChanges && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleDiscardChanges}
+              disabled={saving}
+              leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+              className="text-xs"
+            >
+              Discard Edits
+            </Button>
+          )}
+
+          {isCurrentLiveMonth && todayDay && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleMarkAllPresentToday}
+              disabled={saving || loading}
+              leftIcon={<Sparkles className="w-3.5 h-3.5 text-amber-500" />}
+              className="text-xs hidden md:inline-flex"
+            >
+              Mark All Present Today
+            </Button>
+          )}
+
           <Button
             variant="secondary"
             size="sm"
             onClick={() => window.print()}
             leftIcon={<Printer className="w-3.5 h-3.5" />}
           >
-            Print / PDF
+            Print
           </Button>
+
           <Button
             variant="secondary"
             size="sm"
@@ -388,8 +460,9 @@ export default function AttendanceMasterGridPage() {
               )
             }
           >
-            {downloadingFormat === 'excel' ? 'Exporting...' : 'Download Excel'}
+            Excel
           </Button>
+
           <Button
             variant="secondary"
             size="sm"
@@ -403,29 +476,76 @@ export default function AttendanceMasterGridPage() {
               )
             }
           >
-            {downloadingFormat === 'docx' ? 'Generating...' : 'Download DOCX'}
+            DOCX
           </Button>
+
+          {/* Canonical Overwrite Save Button */}
           <Button
             variant="primary"
             size="sm"
             onClick={handleSave}
-            disabled={saving || !!dataError}
-            leftIcon={saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            disabled={saving || loading}
+            leftIcon={
+              saving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )
+            }
+            className={`font-semibold shadow-xs transition-all ${
+              hasUnsavedChanges
+                ? 'ring-2 ring-emerald-500 ring-offset-1 bg-emerald-600 hover:bg-emerald-700 text-white'
+                : ''
+            }`}
           >
-            {saving ? 'Saving...' : 'Save Changes'}
+            {saving ? 'Saving to Firestore...' : hasUnsavedChanges ? 'Save Changes (Unsaved)' : 'Save Changes'}
           </Button>
         </div>
       </div>
 
-      {dataError && <div role="alert" className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{dataError}</div>}
-      {savedNotice && (
-        <div className="p-3 px-4 rounded-xl bg-[var(--badge-success-bg,#E6F4EA)] border border-[var(--badge-success-border,#CEEAD6)] text-[var(--badge-success-text,#137333)] text-xs flex items-center gap-2 transition-all shadow-xs">
-          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-          <span>Attendance records successfully updated and synced across GSS network and Google Sheets.</span>
+      {/* Unsaved Changes Banner */}
+      {hasUnsavedChanges && (
+        <div className="p-3 px-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+            <span className="font-medium">
+              You have unsaved changes in the attendance matrix. Click <strong>Save Changes</strong> to overwrite and persist to Cloud Firestore.
+            </span>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={saving}
+            className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+          >
+            {saving ? 'Saving...' : 'Save Now'}
+          </Button>
         </div>
       )}
 
-      {/* Month Navigation & Grid Legend Bar */}
+      {/* Success Notification */}
+      {savedNotice && (
+        <div className="p-3 px-4 rounded-xl bg-[var(--badge-success-bg,#E6F4EA)] border border-[var(--badge-success-border,#CEEAD6)] text-[var(--badge-success-text,#137333)] text-xs flex items-center gap-2 transition-all shadow-xs animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+          <span className="font-medium">{savedNotice}</span>
+        </div>
+      )}
+
+      {/* Error Notification */}
+      {dataError && (
+        <div role="alert" className="p-3 px-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-900 text-red-700 dark:text-red-300 text-xs flex items-center justify-between gap-2 shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+            <span>{dataError}</span>
+          </div>
+          <Button variant="secondary" size="sm" onClick={loadAttendanceData} className="h-6 text-[11px]">
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Month Navigation, Branch Filter & Grid Legend Bar */}
       <div className="bg-[var(--bg-card,#FFFFFF)] border border-[var(--border-card,#DADCE0)] rounded-2xl p-3.5 px-5 flex flex-wrap items-center justify-between gap-4 text-xs shadow-xs">
         {/* Month Selector Controls */}
         <div className="flex items-center gap-2">
@@ -437,7 +557,7 @@ export default function AttendanceMasterGridPage() {
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          
+
           <span className="font-semibold text-xs text-[var(--text-primary,#1F1F1F)] px-2 min-w-[130px] text-center">
             {currentMonthTitle}
           </span>
@@ -461,6 +581,25 @@ export default function AttendanceMasterGridPage() {
             </button>
           )}
         </div>
+
+        {/* Branch Filter for Super Admin */}
+        {isSuperAdmin && (
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-[var(--text-muted,#747775)]" />
+            <select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value)}
+              className="bg-[var(--bg-canvas,#F8FAFD)] border border-[var(--border-card,#DADCE0)] rounded-lg px-2.5 py-1 text-xs text-[var(--text-primary,#1F1F1F)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-primary,#1A73E8)]"
+            >
+              <option value="All">All Branches (CHN, CBE, MDU, ERD)</option>
+              {BRANCHES.map((b) => (
+                <option key={b} value={b}>
+                  {b} Branch
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Status Legend */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -527,10 +666,10 @@ export default function AttendanceMasterGridPage() {
                   <td colSpan={workingDays.length + 1} className="py-16 text-center text-[var(--text-secondary,#444746)]">
                     <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-[var(--brand-primary,#1A73E8)]" />
                     <p className="font-semibold text-sm text-[var(--text-primary,#1F1F1F)]">
-                      Loading {currentMonthTitle} Attendance Grid...
+                      Loading {currentMonthTitle} Attendance Grid from Firestore...
                     </p>
                     <p className="text-xs text-[var(--text-muted,#747775)] mt-1">
-                      Querying live biometric and dual-persistence attendance registers...
+                      Querying live canonical database and biometric registers...
                     </p>
                   </td>
                 </tr>
@@ -540,7 +679,7 @@ export default function AttendanceMasterGridPage() {
                     <CalendarCheck className="w-8 h-8 mx-auto mb-2 opacity-40 text-[var(--text-muted,#747775)]" />
                     <p className="font-medium text-sm text-[var(--text-primary,#1F1F1F)]">No staff attendance records</p>
                     <p className="text-xs text-[var(--text-muted,#747775)] mt-1">
-                      Staff members from your branch will appear here once approved.
+                      Staff members from this branch will appear here once approved.
                     </p>
                   </td>
                 </tr>
@@ -582,22 +721,20 @@ export default function AttendanceMasterGridPage() {
                             isToday ? 'bg-[var(--brand-container,#E8F0FE)]/40 font-bold' : ''
                           }`}
                         >
-                          {status ? (
-                            <button
-                              type="button"
-                              onClick={() => cycleStatus(rec.id, w.day)}
-                              className={`w-7 h-7 rounded-lg text-[11px] font-bold border transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center ${
-                                statusStyles[status]
-                              }`}
-                              title={`${w.weekdayShort} ${w.day}: ${status.toUpperCase()} ${
-                                isToday && rec.punchInTime ? `(Punched In: ${rec.punchInTime})` : ''
-                              } (Click to toggle)`}
-                            >
-                              {status === 'present' ? 'P' : status === 'absent' ? 'A' : 'H'}
-                            </button>
-                          ) : (
-                            <span className="text-[var(--text-muted,#9AA0A6)] text-xs font-mono">—</span>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => cycleStatus(rec.id, w.day)}
+                            className={`w-7 h-7 rounded-lg text-[11px] font-bold border transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center ${
+                              status
+                                ? statusStyles[status]
+                                : 'bg-[var(--bg-canvas,#F8FAFD)] text-[var(--text-muted,#9AA0A6)] border-dashed border-[var(--border-card,#DADCE0)] hover:border-[var(--brand-primary,#1A73E8)] hover:text-[var(--text-primary,#1F1F1F)]'
+                            }`}
+                            title={`${w.weekdayShort} ${w.day}: ${status ? status.toUpperCase() : 'UNRECORDED'} ${
+                              isToday && rec.punchInTime ? `(Punched In: ${rec.punchInTime})` : ''
+                            } (Click to toggle)`}
+                          >
+                            {status === 'present' ? 'P' : status === 'absent' ? 'A' : status === 'holiday' ? 'H' : '—'}
+                          </button>
                         </td>
                       );
                     })}

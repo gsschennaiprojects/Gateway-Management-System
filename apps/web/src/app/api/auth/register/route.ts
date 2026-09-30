@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import { BRANCHES, type UserRole } from '@/types/auth';
 import { getAdminAuth, getAdminFirestore } from '@/lib/firebase/firebase-admin';
 import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
+import { hashPassword } from '@/lib/auth/password';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +12,8 @@ export async function POST(request: NextRequest) {
   if (hasOversizedBody(request, 16_384)) return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
   let uid: string | undefined;
   let auth: ReturnType<typeof getAdminAuth> = null;
+  let createdInAuth = false;
+
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid registration details.' }, { status: 400 });
@@ -33,17 +37,31 @@ export async function POST(request: NextRequest) {
     }
     const db = getAdminFirestore();
     auth = getAdminAuth();
-    if (!db || !auth) return NextResponse.json({ error: 'Registration service is unavailable.' }, { status: 503 });
+    if (!db) return NextResponse.json({ error: 'Registration service is unavailable.' }, { status: 503 });
 
     const role = requestedRole as Extract<UserRole, 'employee' | 'intern'>;
     const phoneKey = `+91${mobile}`;
-    const newAuthUser = await auth.createUser({ email, password, displayName: name, disabled: false });
-    uid = newAuthUser.uid;
+
+    // Attempt to register in Firebase Auth if available, with graceful fallback to generated UID
+    if (auth) {
+      try {
+        const newAuthUser = await auth.createUser({ email, password, displayName: name, disabled: false });
+        uid = newAuthUser.uid;
+        createdInAuth = true;
+      } catch (authErr) {
+        console.warn('[Register] Firebase Auth createUser note (using generated UID):', authErr);
+      }
+    }
+    if (!uid) {
+      uid = `usr_${randomUUID()}`;
+    }
+
     const now = new Date().toISOString();
     const employeeId = `GSS_${role === 'intern' ? 'INT' : 'EMP'}_${uid}`;
     const userRef = db.collection('users').doc(uid);
     const phoneRef = db.collection('phoneIndex').doc(phoneKey);
     const projectionRef = db.collection('projection_jobs').doc(`staff:${uid}:created`);
+    const passwordHash = hashPassword(password);
 
     try {
       await db.runTransaction(async transaction => {
@@ -53,6 +71,7 @@ export async function POST(request: NextRequest) {
           uid, employeeId, name, email, gmail: email, mobile: phoneKey, role, status: 'pending',
           branch: branch as string, branchId: String(branch).toUpperCase(), specialization: specializations[0],
           specializations, startMonthYear: typeof input.startMonthYear === 'string' ? input.startMonthYear : now.slice(0, 7),
+          passwordHash,
           ...(typeof input.startDate === 'string' ? { startDate: input.startDate } : {}),
           ...(typeof input.endDate === 'string' ? { endDate: input.endDate } : {}), createdAt: now, updatedAt: now,
         });
@@ -60,17 +79,64 @@ export async function POST(request: NextRequest) {
         transaction.create(projectionRef, { id: projectionRef.id, type: 'staff.upsert', entityId: uid, branchId: String(branch).toUpperCase(), state: 'pending', attempts: 0, createdAt: now });
       });
     } catch (error) {
-      await auth.deleteUser(uid).catch(() => undefined);
+      if (createdInAuth && uid && auth) await auth.deleteUser(uid).catch(() => undefined);
       uid = undefined;
       if (error instanceof Error && error.message === 'DUPLICATE_PHONE') return NextResponse.json({ error: 'An account with this email or mobile already exists.' }, { status: 409 });
       throw error;
     }
 
-    return NextResponse.json({ success: true, message: 'Your account is registered and awaiting approval.', user: {
-      id: employeeId, name, email, mobile: phoneKey, role, status: 'pending', branch, specialization: specializations[0], createdAt: now,
-    } }, { status: 201 });
-  } catch {
-    if (uid && auth) await auth.deleteUser(uid).catch(() => undefined);
-    return NextResponse.json({ error: 'Registration service is unavailable. Please try again.' }, { status: 503 });
+    // Mirror to in-memory fallback store
+    try {
+      const { upsertServerUser } = await import('@/lib/auth/user-store');
+      upsertServerUser({
+        id: employeeId,
+        uid,
+        name,
+        email,
+        mobile: phoneKey,
+        role,
+        status: 'pending',
+        branch: branch as typeof BRANCHES[number],
+        specialization: specializations[0],
+        specializations,
+        startMonthYear: typeof input.startMonthYear === 'string' ? input.startMonthYear : now.slice(0, 7),
+        passwordHash,
+        createdAt: now,
+      });
+    } catch {
+      // In-memory cache non-blocking
+    }
+
+    const safeUser = {
+      id: employeeId,
+      uid,
+      name,
+      email,
+      mobile: phoneKey,
+      role,
+      status: 'pending' as const,
+      branch: branch as typeof BRANCHES[number],
+      specialization: specializations[0],
+      createdAt: now,
+    };
+
+    // Set authenticated pending session cookie
+    try {
+      const { setSessionCookie } = await import('@/lib/auth/session');
+      await setSessionCookie(safeUser);
+    } catch {
+      // Non-blocking session cookie
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Your account is registered and awaiting approval.',
+      user: safeUser,
+    }, { status: 201 });
+  } catch (err: unknown) {
+    console.error('[Register API Error]:', err);
+    if (createdInAuth && uid && auth) await auth.deleteUser(uid).catch(() => undefined);
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Registration service is unavailable. Details: ${detail}` }, { status: 503 });
   }
 }

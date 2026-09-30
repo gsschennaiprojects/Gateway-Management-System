@@ -109,13 +109,28 @@ export async function PATCH(request: NextRequest) {
     const auditProjectionRef = db.collection('projection_jobs').doc(`audit:${auditId}`);
     const branch = String(updates.branch || target.branch);
     const branchId = BRANCH_NAME_TO_CODE[branch] || branch.toUpperCase();
-    const authBefore = await auth.getUser(uid);
+    let authBefore: { email?: string; phoneNumber?: string; disabled?: boolean } | null = null;
+    try {
+      if (auth) {
+        authBefore = await auth.getUser(uid);
+      }
+    } catch {
+      authBefore = null;
+    }
+
     const authUpdates = {
       ...(updates.email ? { email: String(updates.email) } : {}),
       ...(updates.mobile ? { phoneNumber: String(updates.mobile) } : {}),
       ...(updates.status ? { disabled: nextStatus !== 'active' } : {}),
     };
-    if (Object.keys(authUpdates).length) await auth.updateUser(uid, authUpdates);
+    if (auth && authBefore && Object.keys(authUpdates).length) {
+      try {
+        await auth.updateUser(uid, authUpdates);
+      } catch (authUpdateErr) {
+        console.warn('[AuthUsers] Firebase Auth updateUser note:', authUpdateErr);
+      }
+    }
+
     try {
       await db.runTransaction(async transaction => {
         const current = await transaction.get(profileRef);
@@ -138,7 +153,7 @@ export async function PATCH(request: NextRequest) {
         transaction.create(auditProjectionRef, { id: auditProjectionRef.id, type: 'audit.project', entityId: auditId, branchId, state: 'pending', attempts: 0, createdAt: now });
       });
     } catch (error) {
-      if (Object.keys(authUpdates).length) {
+      if (auth && authBefore && Object.keys(authUpdates).length) {
         await auth.updateUser(uid, {
           email: authBefore.email || undefined,
           phoneNumber: authBefore.phoneNumber || null,

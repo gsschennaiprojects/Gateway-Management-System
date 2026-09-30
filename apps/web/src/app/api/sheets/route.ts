@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 import { getFirestoreStudents, getFirestoreTasks, getFirestoreUserById, getFirestoreUsers, getFirestoreWorklogs, syncStudentToFirestore } from '@/lib/firebase/firebase-admin';
+import { getFirestoreStaffAttendanceGrid, saveFirestoreStaffAttendanceGrid } from '@/lib/attendance/attendance-service';
 import type { UserRole } from '@/types/auth';
 import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
 
@@ -71,7 +72,24 @@ export async function GET(request: NextRequest) {
       const students = await getFirestoreStudents({ branch });
       return NextResponse.json({ success: true, data: students, count: students.length, source: 'firestore' }, { headers: PRIVATE_HEADERS });
     }
-    if (type === 'staff_attendance') return error(503, 'Attendance directory projection is not configured in the canonical database.');
+    if (type === 'staff_attendance') {
+      if (!['superadmin', 'admin', 'hr'].includes(session.user.role)) return error(403, 'Forbidden');
+      const now = new Date();
+      const parsedYear = parseInt(searchParams.get('year') || '', 10);
+      const parsedMonth = parseInt(searchParams.get('month') || '', 10);
+      const year = !isNaN(parsedYear) ? parsedYear : now.getFullYear();
+      const month = !isNaN(parsedMonth) ? parsedMonth : now.getMonth() + 1;
+      const { records } = await getFirestoreStaffAttendanceGrid({ year, month, branch });
+      const data = records.map(r => ({
+        staffId: r.id,
+        name: r.name,
+        branch: r.branch,
+        punchIn: r.punchInTime,
+        punchOut: r.punchOutTime,
+        attendance: r.attendance,
+      }));
+      return NextResponse.json({ success: true, data, count: data.length, source: 'firestore' }, { headers: PRIVATE_HEADERS });
+    }
     return error(400, 'Unknown data type.');
   } catch {
     return error(503, 'Requested data is temporarily unavailable.');
@@ -82,12 +100,32 @@ export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) return error(401, 'Unauthorized');
   if (!isSameOriginRequest(request)) return error(403, 'Request origin is not allowed.');
-  if (hasOversizedBody(request, 32_768)) return error(413, 'Request is too large.');
+  if (hasOversizedBody(request, 65_536)) return error(413, 'Request is too large.');
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object') return error(400, 'Invalid request.');
     const input = body as Record<string, unknown>;
     const type = input.type;
+
+    if (type === 'staff_attendance_bulk') {
+      if (!['superadmin', 'admin'].includes(session.user.role)) return error(403, 'Forbidden');
+      const year = typeof input.year === 'number' ? input.year : new Date().getFullYear();
+      const month = typeof input.month === 'number' ? input.month : new Date().getMonth() + 1;
+      const records = Array.isArray(input.records) ? (input.records as Array<{ staffId: string; name: string; attendance: Record<number, 'present' | 'absent' | 'holiday'> }>) : [];
+      const result = await saveFirestoreStaffAttendanceGrid({
+        year,
+        month,
+        records,
+        actor: {
+          id: session.user.id,
+          name: session.user.name,
+          role: session.user.role,
+          branch: session.user.branch,
+        },
+      });
+      return NextResponse.json({ success: true, ...result }, { status: 200, headers: PRIVATE_HEADERS });
+    }
+
     const data = input.data;
     if (!data || typeof data !== 'object') return error(400, 'Missing data.');
     const code = resolveBranchCode(typeof input.branchCode === 'string' ? input.branchCode : null, session.user.branch);

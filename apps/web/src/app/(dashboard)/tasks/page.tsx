@@ -165,7 +165,8 @@ export default function TasksManagementPage() {
       return;
     }
 
-    if (targetType === 'individual' && !targetUserId) {
+    const effectiveUserId = targetUserId || (assignableUsers[0]?.id || '');
+    if (targetType === 'individual' && !effectiveUserId) {
       setFormError('Please select a staff member to assign.');
       return;
     }
@@ -173,10 +174,10 @@ export default function TasksManagementPage() {
     setIsSubmitting(true);
     try {
       const payload = {
-        title,
-        description,
+        title: title.trim(),
+        description: description.trim(),
         targetType,
-        targetUserId: targetType === 'individual' ? targetUserId : undefined,
+        targetUserId: targetType === 'individual' ? effectiveUserId : undefined,
         targetGroup:
           targetType === 'group'
             ? {
