@@ -19,12 +19,12 @@
  * exposed to browser client bundles.
  */
 
-import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/app';
+import type { App } from 'firebase-admin/app';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getFirestore, type Firestore, type Query, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
-import { getAuth, type Auth } from 'firebase-admin/auth';
+import type { Firestore, Query, QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import type { Auth } from 'firebase-admin/auth';
 import type { Branch, User, UserRole, UserStatus } from '@/types/auth';
 import type { AssignedTask, TaskGroupTarget, TaskStatus } from '@/types/task';
 import type { TaskNotification } from '@/types/task';
@@ -173,23 +173,98 @@ function loadServiceAccountKey(): FirebaseServiceAccount | null {
   }
 }
 
+interface FirebaseAppModule {
+  getApps: () => App[];
+  getApp: () => App;
+  initializeApp: (options: unknown) => App;
+  cert: (sa: unknown) => unknown;
+}
+
+interface FirebaseFirestoreModule {
+  getFirestore: (app?: App) => Firestore;
+}
+
+interface FirebaseAuthModule {
+  getAuth: (app?: App) => Auth;
+}
+
+function getFirebaseAdminAppModule(): FirebaseAppModule | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('firebase-admin/app');
+  } catch {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const rootAdmin = require('firebase-admin');
+      return {
+        getApps: () => (rootAdmin.apps ? rootAdmin.apps.filter(Boolean) : []),
+        getApp: () => rootAdmin.app(),
+        initializeApp: (options: unknown) => rootAdmin.initializeApp(options),
+        cert: (sa: unknown) => rootAdmin.credential.cert(sa),
+      };
+    } catch (err) {
+      console.warn('[FirebaseAdmin] Failed to load firebase-admin/app module:', errorMessage(err));
+      return null;
+    }
+  }
+}
+
+function getFirebaseAdminFirestoreModule(): FirebaseFirestoreModule | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('firebase-admin/firestore');
+  } catch {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const rootAdmin = require('firebase-admin');
+      return {
+        getFirestore: (app?: App) => (app ? rootAdmin.firestore(app) : rootAdmin.firestore()),
+      };
+    } catch (err) {
+      console.warn('[FirebaseAdmin] Failed to load firebase-admin/firestore module:', errorMessage(err));
+      return null;
+    }
+  }
+}
+
+function getFirebaseAdminAuthModule(): FirebaseAuthModule | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('firebase-admin/auth');
+  } catch {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const rootAdmin = require('firebase-admin');
+      return {
+        getAuth: (app?: App) => (app ? rootAdmin.auth(app) : rootAdmin.auth()),
+      };
+    } catch (err) {
+      console.warn('[FirebaseAdmin] Failed to load firebase-admin/auth module:', errorMessage(err));
+      return null;
+    }
+  }
+}
+
 export function getAdminApp(): App | null {
   if (adminApp) return adminApp;
 
-  if (getApps().length > 0) {
-    adminApp = getApp();
-    return adminApp;
-  }
+  const appMod = getFirebaseAdminAppModule();
+  if (!appMod) return null;
 
   try {
+    if (appMod.getApps().length > 0) {
+      adminApp = appMod.getApp();
+      return adminApp;
+    }
+
     const sa = loadServiceAccountKey();
     if (!sa) {
       console.warn('[FirebaseAdmin] No valid service account key found. Firebase Admin features will be unavailable.');
       return null;
     }
     const projectId = (sa.project_id as string) || process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'gss-management-system-eef75';
-    adminApp = initializeApp({
-      credential: cert({
+    adminApp = appMod.initializeApp({
+      credential: appMod.cert({
         projectId,
         clientEmail: sa.client_email as string,
         privateKey: (sa.private_key as string).replace(/\\n/g, '\n'),
@@ -207,22 +282,36 @@ export function getAdminFirestore(): Firestore | null {
   if (adminDb) return adminDb;
   const app = getAdminApp();
   if (!app) return null;
-  adminDb = getFirestore(app);
+  const firestoreMod = getFirebaseAdminFirestoreModule();
+  if (!firestoreMod) return null;
   try {
-    adminDb.settings({ ignoreUndefinedProperties: true });
-  } catch {
-    // Intentionally silent: settings() throws if Firestore has already been initialized
-    // in another Next.js worker or warm serverless instance.
+    adminDb = firestoreMod.getFirestore(app);
+    try {
+      adminDb.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // Intentionally silent: settings() throws if Firestore has already been initialized
+      // in another Next.js worker or warm serverless instance.
+    }
+    return adminDb;
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] Firestore resolution error:', errorMessage(err));
+    return null;
   }
-  return adminDb;
 }
 
 export function getAdminAuth(): Auth | null {
   if (adminAuth) return adminAuth;
   const app = getAdminApp();
   if (!app) return null;
-  adminAuth = getAuth(app);
-  return adminAuth;
+  const authMod = getFirebaseAdminAuthModule();
+  if (!authMod) return null;
+  try {
+    adminAuth = authMod.getAuth(app);
+    return adminAuth;
+  } catch (err: unknown) {
+    console.error('[FirebaseAdmin] Auth resolution error:', errorMessage(err));
+    return null;
+  }
 }
 
 /** Resolve a Firebase UID to a strictly validated, credential-free app profile. */

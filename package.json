@@ -17,7 +17,11 @@
   "workspaces": [
     "apps/web"
   ],
+  "dependencies": {
+    "@google-cloud/firestore": "^9.2.0",
+    "firebase-admin": "^14.4.0"
+  },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   }
 }

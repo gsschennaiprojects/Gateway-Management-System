@@ -97,31 +97,24 @@ export function isSameOriginRequest(request: Request): boolean {
     }
   }
 
-  // 3. Fallback for non-production environments (test / development)
-  if (allowedOrigins.size === 0) {
-    if (process.env.NODE_ENV === 'production') {
-      // In standalone production with no configured target, reject
-      return false;
-    }
-    try {
-      allowedOrigins.add(new URL(request.url).origin);
-    } catch {
-      return false;
-    }
-  }
-
   // Exact match against allowed origins set
   if (allowedOrigins.has(origin)) {
     return true;
   }
 
-  // 4. Dynamic Vercel / Reverse Proxy origin resolution
+  // 3. Dynamic Vercel / Reverse Proxy origin resolution
   const isVercelRuntime = process.env.VERCEL === '1' || Boolean(process.env.VERCEL_URL) || Boolean(process.env.VERCEL_PROJECT_PRODUCTION_URL);
 
   if (isVercelRuntime) {
     try {
+      // Allow official Vercel preview and deployment domains (*.vercel.app)
+      const originUrl = new URL(origin);
+      if (originUrl.hostname.endsWith('.vercel.app')) {
+        return true;
+      }
+
       // Allow matching against request.url origin
-      const reqOrigin = new URL(request.url).origin;
+      const reqOrigin = new URL(request.url, 'http://localhost').origin;
       if (origin === reqOrigin) return true;
 
       // Allow matching against forwarded host (Vercel Edge Proxy)
@@ -133,15 +126,19 @@ export function isSameOriginRequest(request: Request): boolean {
           return true;
         }
       }
-
-      // Allow official Vercel preview and deployment domains (*.vercel.app)
-      const originUrl = new URL(origin);
-      if (originUrl.hostname.endsWith('.vercel.app')) {
-        return true;
-      }
     } catch {
       return false;
     }
+  }
+
+  // 4. Always permit official *.vercel.app production & preview domains
+  try {
+    const originUrl = new URL(origin);
+    if (originUrl.hostname.endsWith('.vercel.app')) {
+      return true;
+    }
+  } catch {
+    // ignore
   }
 
   return false;
