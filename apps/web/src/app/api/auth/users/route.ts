@@ -42,7 +42,20 @@ export async function PATCH(request: NextRequest) {
     if (input.action === 'edit_staff' && session.user.role !== 'superadmin') return NextResponse.json({ error: 'Only Super Admin can edit staff profiles.' }, { status: 403 });
     const db = getAdminFirestore();
     const auth = getAdminAuth();
-    if (!db || !auth) return NextResponse.json({ error: 'User service is unavailable.' }, { status: 503 });
+    if (!db) {
+      const { updateUserStatus, updateUserRole, findUserById } = await import('@/lib/auth/user-store');
+      const memUser = findUserById(input.userId);
+      if (!memUser) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+      if (input.action === 'update_status') {
+        const updated = updateUserStatus(input.userId, input.status as 'active' | 'rejected');
+        return NextResponse.json({ success: true, user: updated });
+      }
+      if (input.action === 'update_role') {
+        const updated = updateUserRole(input.userId, input.role as UserRole);
+        return NextResponse.json({ success: true, user: updated });
+      }
+      return NextResponse.json({ error: 'User service is unavailable.' }, { status: 503 });
+    }
     const allUsers = await getFirestoreUsers();
     const target = allUsers.find(item => item.id === input.userId || item.uid === input.userId);
     if (!target) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
