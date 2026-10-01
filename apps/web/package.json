@@ -18,9 +18,10 @@
     "docx": "^9.7.1",
     "firebase": "^12.19.0",
     "firebase-admin": "^14.4.0",
+    "gateway-management-system": "file:../..",
     "googleapis": "^181.0.0",
     "lucide-react": "^1.45.0",
-    "next": "16.3.5",
+    "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "xlsx": "^0.18.5"
@@ -33,7 +34,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.5",
+    "eslint-config-next": "16.3.8",
     "jest": "^30.5.2",
     "tailwindcss": "^4",
     "typescript": "^5"
