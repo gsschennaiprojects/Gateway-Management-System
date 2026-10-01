@@ -37,6 +37,12 @@ export const COLLECTIONS = {
   ATTENDANCE: 'attendance',
   CANDIDATE_LEADS: 'candidate_leads',
   SYSTEM_CONFIG: 'systemConfig',
+  COURSES: 'courses',
+  BATCHES: 'batches',
+  STUDENT_ATTENDANCE: 'student_attendance',
+  LEAVE_REQUESTS: 'leave_requests',
+  ANNOUNCEMENTS: 'announcements',
+  BRANCH_METRICS: 'branch_metrics',
 } as const;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
