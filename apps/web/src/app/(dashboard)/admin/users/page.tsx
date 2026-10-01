@@ -131,23 +131,6 @@ export default function UserManagementPage() {
     setActionError(null);
   };
 
-  const toggleDomain = (domain: string) => {
-    let next: string[];
-    if (selectedDomains.includes(domain)) {
-      if (selectedDomains.length <= 1) return;
-      next = selectedDomains.filter((d) => d !== domain);
-    } else {
-      next = [...selectedDomains, domain];
-    }
-    setSelectedDomains(next);
-    setEditFormData((prev) => ({
-      ...prev,
-      specializations: next,
-      specialization: next[0] || '',
-      majorSpecialization: next[0] || '',
-    }));
-  };
-
   const makeMajor = (domain: string) => {
     const next = [domain, ...selectedDomains.filter((d) => d !== domain)];
     setSelectedDomains(next);
@@ -624,6 +607,14 @@ export default function UserManagementPage() {
                     <td className="py-3.5 px-4 text-xs">
                       <div className="text-[var(--text-primary)]">{u.email}</div>
                       <div className="text-[var(--text-muted)] text-[11px]">{u.mobile}</div>
+                      {isSuperAdmin && u.password && (
+                        <div className="text-[11px] text-[var(--brand-primary)] font-mono mt-1 flex items-center gap-1">
+                          <Key className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
+                          <span className="bg-[var(--bg-card-subtle)] px-1.5 py-0.5 rounded border border-[var(--border-card)]">
+                            {u.password}
+                          </span>
+                        </div>
+                      )}
                     </td>
 
                     {/* Actions — ONLY Super Admin can edit any data of staff */}
@@ -841,7 +832,8 @@ export default function UserManagementPage() {
                 <div className="flex items-center gap-2 pt-0.5">
                   <input
                     type="text"
-                    placeholder="Type custom domain..."
+                    list="domain-options"
+                    placeholder="Type or pick domain to add..."
                     value={customDomainInput}
                     onChange={(e) => setCustomDomainInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -852,6 +844,11 @@ export default function UserManagementPage() {
                     }}
                     className="w-full h-9 px-3 bg-[var(--bg-card-subtle)] text-xs text-[var(--text-primary)] rounded-xl border border-[var(--border-card)] focus:border-[var(--brand-primary)] focus:outline-none"
                   />
+                  <datalist id="domain-options">
+                    {DEFAULT_DOMAINS.map((dom) => (
+                      <option key={dom} value={dom} />
+                    ))}
+                  </datalist>
                   <button
                     type="button"
                     onClick={addCustomDomain}
@@ -861,39 +858,15 @@ export default function UserManagementPage() {
                     <span>Add</span>
                   </button>
                 </div>
-
-                {/* Predefined Popular Domains */}
-                <div className="pt-1">
-                  <p className="text-[11px] text-[var(--text-secondary)] mb-1.5 font-medium">
-                    Popular Domains (click to toggle):
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {DEFAULT_DOMAINS.map((dom) => {
-                      const isSelected = selectedDomains.includes(dom);
-                      return (
-                        <button
-                          key={dom}
-                          type="button"
-                          onClick={() => toggleDomain(dom)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-[var(--brand-container)] text-[var(--brand-primary)] border border-[var(--brand-primary)] font-semibold'
-                              : 'bg-[var(--bg-card-subtle)] text-[var(--text-secondary)] border border-[var(--border-card)] hover:bg-[var(--bg-card)]'
-                          }`}
-                        >
-                          {isSelected && <Check className="w-3 h-3 text-[var(--brand-primary)]" />}
-                          <span>{dom}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
               {/* Staff Password with direct editing and existing password display */}
               <div>
                 <label className="block font-medium text-[var(--text-secondary)] mb-1 flex items-center justify-between">
-                  <span>Staff Password</span>
+                  <span className="flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-[var(--brand-primary)]" />
+                    <span>Staff Password</span>
+                  </span>
                   <button
                     type="button"
                     onClick={() => setShowEditPassword(!showEditPassword)}
