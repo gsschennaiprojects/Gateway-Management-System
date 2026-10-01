@@ -30,7 +30,7 @@ interface StaffAttendanceRecord {
   branch?: string;
   punchInTime?: string;
   punchOutTime?: string;
-  attendance: Record<number, 'present' | 'absent' | 'holiday'>;
+  attendance: Record<number, 'present' | 'absent' | 'holiday' | 'half_day' | 'late'>;
   lastUpdated?: string;
   updatedBy?: {
     id: string;
@@ -188,15 +188,17 @@ export default function AttendanceMasterGridPage() {
     void Promise.resolve().then(loadAttendanceData);
   }, [loadAttendanceData]);
 
-  // Cycle status on cell click (unrecorded -> present -> absent -> holiday -> unrecorded)
+  // Cycle status on cell click (unrecorded -> present -> late -> half_day -> absent -> holiday -> unrecorded)
   const cycleStatus = (recordId: string, day: number) => {
     setRecords((prev) =>
       prev.map((rec) => {
         if (rec.id !== recordId) return rec;
         const current = rec.attendance[day];
-        const next: Record<string, 'present' | 'absent' | 'holiday' | undefined> = {
+        const next: Record<string, 'present' | 'late' | 'half_day' | 'absent' | 'holiday' | undefined> = {
           unrecorded: 'present',
-          present: 'absent',
+          present: 'late',
+          late: 'half_day',
+          half_day: 'absent',
           absent: 'holiday',
           holiday: undefined,
         };
@@ -602,11 +604,19 @@ export default function AttendanceMasterGridPage() {
         )}
 
         {/* Status Legend */}
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <span className="text-[var(--text-secondary,#444746)] font-medium">Status:</span>
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)] font-medium">
             <span className="w-2 h-2 rounded-full bg-[var(--badge-success-text,#137333)]" />
             <span>Present (P)</span>
+          </div>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-medium">
+            <span className="w-2 h-2 rounded-full bg-amber-600" />
+            <span>Late (L)</span>
+          </div>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-300 font-medium">
+            <span className="w-2 h-2 rounded-full bg-orange-600" />
+            <span>Half-Day (HD)</span>
           </div>
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--badge-danger-bg,#FCE8E6)] text-[var(--badge-danger-text,#C5221F)] border border-[var(--badge-danger-border,#FAD2CF)] font-medium">
             <span className="w-2 h-2 rounded-full bg-[var(--badge-danger-text,#C5221F)]" />
@@ -708,6 +718,10 @@ export default function AttendanceMasterGridPage() {
                       const statusStyles = {
                         present:
                           'bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border-[var(--badge-success-border,#CEEAD6)] hover:opacity-90',
+                        late:
+                          'bg-amber-100 text-amber-900 border-amber-300 hover:opacity-90 font-bold',
+                        half_day:
+                          'bg-orange-100 text-orange-900 border-orange-300 hover:opacity-90 font-bold',
                         absent:
                           'bg-[var(--badge-danger-bg,#FCE8E6)] text-[var(--badge-danger-text,#C5221F)] border-[var(--badge-danger-border,#FAD2CF)] hover:opacity-90',
                         holiday:
@@ -733,7 +747,7 @@ export default function AttendanceMasterGridPage() {
                               isToday && rec.punchInTime ? `(Punched In: ${rec.punchInTime})` : ''
                             } (Click to toggle)`}
                           >
-                            {status === 'present' ? 'P' : status === 'absent' ? 'A' : status === 'holiday' ? 'H' : '—'}
+                            {status === 'present' ? 'P' : status === 'late' ? 'L' : status === 'half_day' ? 'HD' : status === 'absent' ? 'A' : status === 'holiday' ? 'H' : '—'}
                           </button>
                         </td>
                       );

@@ -23,6 +23,7 @@ import {
   Check,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
+import { evaluateEntryPunctuality } from '@/lib/worklogs/worklog-session-utils';
 
 interface WorklogEntry {
   logId: string;
@@ -252,11 +253,28 @@ export default function WorklogPage() {
                   </span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--badge-success-bg,#E6F4EA)] text-[var(--badge-success-text,#137333)] border border-[var(--badge-success-border,#CEEAD6)] text-xs font-medium">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                     Punched In: {loginTime}
                   </span>
+                  {(() => {
+                    const punctuality = evaluateEntryPunctuality(loginTime);
+                    if (punctuality.isLate) {
+                      return (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-xs font-semibold">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          Late Entry (+{punctuality.minutesLate}m)
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-semibold">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        Verified On-Time (09:00 - 09:30 AM Shift)
+                      </span>
+                    );
+                  })()}
                   <button
                     type="button"
                     onClick={() => punchIn()}
@@ -304,11 +322,22 @@ export default function WorklogPage() {
                   })()}
                 </div>
               ) : logoutTime ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-card-subtle,#F1F3F4)] text-[var(--text-secondary,#5F6368)] border border-[var(--border-subtle,#E8EAED)] text-xs font-medium">
                     <Check className="w-3.5 h-3.5 text-blue-600" />
                     Punched Out: {logoutTime}
                   </span>
+                  {workingCalc && (
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                      workingCalc.isFullDay
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                        : workingCalc.isHalfDay
+                          ? 'bg-orange-50 text-orange-800 border-orange-300'
+                          : 'bg-rose-50 text-rose-800 border-rose-300'
+                    }`}>
+                      {workingCalc.isFullDay ? '✓ Full Day Credited (≥7.5h)' : workingCalc.isHalfDay ? '⚠ Half Day Credited (≥4h)' : '⚠ Short Attendance (<4h)'}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => punchOut()}

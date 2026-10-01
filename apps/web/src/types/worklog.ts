@@ -20,6 +20,8 @@
 
 import { UserRole, Branch } from './auth';
 
+export type StaffAttendanceStatus = 'present' | 'late' | 'half_day' | 'absent' | 'holiday' | 'on_leave';
+
 export interface WorkLogEntry {
   id: string;
   userId: string;
@@ -32,9 +34,15 @@ export interface WorkLogEntry {
   plannedTasks: string[];
   completedTasks: string[];
   incompleteReason?: string;
-  attendanceStatus: 'present' | 'absent' | 'holiday';
+  attendanceStatus: StaffAttendanceStatus;
   hoursLogged?: number;
   totalHours?: string | number;
+  workingMinutes?: number;
+  isLate?: boolean;
+  minutesLate?: number;
+  entryIp?: string;
+  userAgent?: string;
+  verifiedStatus?: string;
 }
 
 export interface StaffMonthlySummary {
@@ -45,9 +53,13 @@ export interface StaffMonthlySummary {
   month: string; // e.g. "September 2026"
   totalWorkingDays: number;
   presentDays: number;
+  lateDays?: number;
+  halfDays?: number;
   absentDays: number;
   holidayDays: number;
   attendanceRate: number;
+  punctualityRate?: number;
+  averageHoursPerDay?: number;
   totalPlannedTasks: number;
   totalCompletedTasks: number;
   completionRate: number;

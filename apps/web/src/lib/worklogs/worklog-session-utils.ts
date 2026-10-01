@@ -18,6 +18,13 @@ export interface LiveDateInfo {
   day: number;            // 23
 }
 
+export interface PunctualityEvaluation {
+  isLate: boolean;
+  minutesLate: number;
+  entryStatus: 'on_time' | 'late' | 'half_day';
+  statusLabel: string;
+}
+
 export interface WorkingTimeCalculation {
   totalMinutes: number;
   hours: number;
@@ -25,7 +32,9 @@ export interface WorkingTimeCalculation {
   decimalHours: number;   // e.g. 9.25
   formatted: string;      // e.g. "9 hrs 15 mins"
   shortFormatted: string; // e.g. "9h 15m"
-  isFullDay: boolean;     // >= 8.5 hours standard threshold
+  isFullDay: boolean;     // >= 7.5 hours standard threshold
+  isHalfDay: boolean;     // >= 4.0 hours and < 7.5 hours
+  attendanceStatus: 'present' | 'late' | 'half_day' | 'absent';
 }
 
 /**
@@ -105,7 +114,53 @@ export function formatMinutesTo12Hour(minutes: number): string {
 }
 
 /**
+ * Evaluate entry time punctuality against GSS office shift policy:
+ * - 09:00 AM standard arrival.
+ * - Grace period up to 09:30 AM (inclusive) -> On Time.
+ * - 09:31 AM to 01:00 PM -> Late with calculated minutes late.
+ * - After 01:00 PM -> Half-day entry session.
+ */
+export function evaluateEntryPunctuality(timeStr?: string | null): PunctualityEvaluation {
+  const minutes = parseTimeString(timeStr);
+  if (minutes === null) {
+    return { isLate: false, minutesLate: 0, entryStatus: 'on_time', statusLabel: 'On Time' };
+  }
+
+  const graceMinutes = 570; // 09:30 AM (9*60 + 30)
+  const afternoonMinutes = 780; // 01:00 PM (13*60)
+
+  if (minutes <= graceMinutes) {
+    return {
+      isLate: false,
+      minutesLate: 0,
+      entryStatus: 'on_time',
+      statusLabel: 'On Time (Within Grace Period)',
+    };
+  } else if (minutes <= afternoonMinutes) {
+    const lateBy = minutes - graceMinutes;
+    return {
+      isLate: true,
+      minutesLate: lateBy,
+      entryStatus: 'late',
+      statusLabel: `Late by ${lateBy} min${lateBy !== 1 ? 's' : ''}`,
+    };
+  } else {
+    const lateBy = minutes - graceMinutes;
+    return {
+      isLate: true,
+      minutesLate: lateBy,
+      entryStatus: 'half_day',
+      statusLabel: 'Afternoon Entry (Half-Day Session)',
+    };
+  }
+}
+
+/**
  * Calculate total working time between login and logout times.
+ * Integrates punctuality and minimum hours thresholds:
+ * - Full-day: >= 7.5 hours (or >= 450 minutes)
+ * - Half-day: >= 4.0 hours and < 7.5 hours
+ * - Incomplete/Absent: < 4.0 hours
  */
 export function calculateWorkingTime(loginTime?: string | null, logoutTime?: string | null): WorkingTimeCalculation | null {
   const loginMinutes = parseTimeString(loginTime);
@@ -125,7 +180,22 @@ export function calculateWorkingTime(loginTime?: string | null, logoutTime?: str
 
   const formatted = `${hours} hr${hours !== 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} min${minutes !== 1 ? 's' : ''}` : ''}`;
   const shortFormatted = `${hours}h${minutes > 0 ? ` ${minutes}m` : ''}`;
-  const isFullDay = decimalHours >= 8.5;
+  
+  const isFullDay = decimalHours >= 7.5;
+  const isHalfDay = decimalHours >= 4.0 && decimalHours < 7.5;
+
+  const punctuality = evaluateEntryPunctuality(loginTime);
+  let attendanceStatus: 'present' | 'late' | 'half_day' | 'absent' = 'present';
+
+  if (!isFullDay && !isHalfDay) {
+    attendanceStatus = 'absent';
+  } else if (isHalfDay || punctuality.entryStatus === 'half_day') {
+    attendanceStatus = 'half_day';
+  } else if (punctuality.isLate) {
+    attendanceStatus = 'late';
+  } else {
+    attendanceStatus = 'present';
+  }
 
   return {
     totalMinutes: diffMinutes,
@@ -135,6 +205,8 @@ export function calculateWorkingTime(loginTime?: string | null, logoutTime?: str
     formatted,
     shortFormatted,
     isFullDay,
+    isHalfDay,
+    attendanceStatus,
   };
 }
 

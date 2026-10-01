@@ -11,7 +11,7 @@ import { logAuditEvent } from '../audit/audit-service';
 import type { UserRole } from '@/types/auth';
 
 export interface StaffAttendanceDayStatus {
-  [day: number]: 'present' | 'absent' | 'holiday';
+  [day: number]: 'present' | 'absent' | 'holiday' | 'half_day' | 'late';
 }
 
 export interface StaffAttendanceGridRecord {
@@ -93,17 +93,28 @@ export async function getFirestoreStaffAttendanceGrid(params: {
   const worklogs = await getFirestoreWorklogs();
   const monthlyLogs = worklogs.filter(l => l.date >= startDateStr && l.date <= endDateStr);
 
-  const punchInfoMap = new Map<string, { punchIn?: string; punchOut?: string; presentDays: Set<number> }>();
+  const punchInfoMap = new Map<string, { punchIn?: string; punchOut?: string; dayStatuses: Map<number, 'present' | 'absent' | 'holiday' | 'half_day' | 'late'> }>();
   for (const log of monthlyLogs) {
     if (!punchInfoMap.has(log.userId)) {
-      punchInfoMap.set(log.userId, { presentDays: new Set() });
+      punchInfoMap.set(log.userId, { dayStatuses: new Map() });
     }
     const userPunch = punchInfoMap.get(log.userId)!;
     const day = parseInt(log.date.split('-')[2], 10);
     if (!isNaN(day)) {
-      if (log.attendanceStatus === 'present' || log.loginTime) {
-        userPunch.presentDays.add(day);
-      }
+      const st = (log.attendanceStatus as string) || '';
+      const mappedStatus: 'present' | 'absent' | 'holiday' | 'half_day' | 'late' =
+        st === 'late'
+          ? 'late'
+          : st === 'half_day' || st === 'half-day'
+            ? 'half_day'
+            : st === 'holiday'
+              ? 'holiday'
+              : st === 'absent'
+                ? 'absent'
+                : (log.loginTime ? 'present' : 'present');
+
+      userPunch.dayStatuses.set(day, mappedStatus);
+
       // If log is today
       const todayDateStr = new Date().toISOString().slice(0, 10);
       if (log.date === todayDateStr) {
@@ -122,8 +133,8 @@ export async function getFirestoreStaffAttendanceGrid(params: {
 
     // If worklogs indicate presence, initialize as default
     if (punch) {
-      for (const d of punch.presentDays) {
-        attendance[d] = 'present';
+      for (const [d, st] of punch.dayStatuses.entries()) {
+        attendance[d] = st;
       }
     }
 
@@ -131,8 +142,8 @@ export async function getFirestoreStaffAttendanceGrid(params: {
     if (saved && saved.attendance) {
       for (const [dayKey, status] of Object.entries(saved.attendance)) {
         const d = parseInt(dayKey, 10);
-        if (!isNaN(d) && ['present', 'absent', 'holiday'].includes(status)) {
-          attendance[d] = status;
+        if (!isNaN(d) && ['present', 'absent', 'holiday', 'half_day', 'late'].includes(status)) {
+          attendance[d] = status as 'present' | 'absent' | 'holiday' | 'half_day' | 'late';
         }
       }
     }
@@ -195,8 +206,8 @@ export async function saveFirestoreStaffAttendanceGrid(params: {
       for (const [dStr, st] of Object.entries(record.attendance)) {
         const d = parseInt(dStr, 10);
         if (!isNaN(d) && d >= 1 && d <= 31) {
-          if (['present', 'absent', 'holiday'].includes(st)) {
-            cleanAttendance[d] = st;
+          if (['present', 'absent', 'holiday', 'half_day', 'late'].includes(st)) {
+            cleanAttendance[d] = st as 'present' | 'absent' | 'holiday' | 'half_day' | 'late';
           }
         }
       }
