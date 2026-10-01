@@ -1,5 +1,5 @@
 import { StoredUser, INITIAL_USERS } from './mock-users';
-import { RegisterPayload, User, Branch } from '@/types/auth';
+import { RegisterPayload, User, Branch, UserRole } from '@/types/auth';
 import { hashPassword } from './password';
 
 // In-memory runtime store for server-side route handlers
@@ -73,7 +73,9 @@ export function createUser(payload: RegisterPayload & { id?: string }): StoredUs
     ? payload.additionalSpecializations
     : specsArray.slice(1);
 
-  const assignedRole = payload.requestedRole === 'intern' ? 'intern' : 'employee';
+  const assignedRole = (['admin', 'hr', 'employee', 'intern'].includes(payload.requestedRole)
+    ? payload.requestedRole
+    : 'employee') as UserRole;
   const initialStatus = 'pending';
   const userId = payload.id || generateProfessionalUserId(assignedRole, serverUsers);
 

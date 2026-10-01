@@ -29,17 +29,33 @@ export async function POST(request: NextRequest) {
       ? input.specializations.filter((value): value is string => typeof value === 'string').map(value => value.trim()).filter(Boolean)
       : specialization ? [specialization] : [];
 
-    if (name.length < 2 || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-        mobile.length !== 10 || !BRANCHES.includes(branch as typeof BRANCHES[number]) ||
-        !['employee', 'intern'].includes(String(requestedRole)) || password.length < 8 || password.length > 128 ||
-        specializations.length === 0 || specializations.length > 10) {
-      return NextResponse.json({ error: 'Please provide valid registration details.' }, { status: 400 });
+    if (name.length < 2 || name.length > 100) {
+      return NextResponse.json({ error: 'Please enter a valid full name (2-100 characters).' }, { status: 400 });
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
+    }
+    if (mobile.length !== 10) {
+      return NextResponse.json({ error: 'Please enter a valid 10-digit mobile number.' }, { status: 400 });
+    }
+    if (!BRANCHES.includes(branch as typeof BRANCHES[number])) {
+      return NextResponse.json({ error: 'Please select a valid branch location.' }, { status: 400 });
+    }
+    if (!['admin', 'hr', 'employee', 'intern'].includes(String(requestedRole))) {
+      return NextResponse.json({ error: 'Please select a valid requested role.' }, { status: 400 });
+    }
+    if (password.length < 8 || password.length > 128) {
+      return NextResponse.json({ error: 'Password must be between 8 and 128 characters.' }, { status: 400 });
+    }
+    if (specializations.length === 0 || specializations.length > 10) {
+      return NextResponse.json({ error: 'Please select at least one domain specialization.' }, { status: 400 });
+    }
+
     const db = getAdminFirestore();
     auth = getAdminAuth();
     if (!db) return NextResponse.json({ error: 'Registration service is unavailable.' }, { status: 503 });
 
-    const role = requestedRole as Extract<UserRole, 'employee' | 'intern'>;
+    const role = requestedRole as Extract<UserRole, 'admin' | 'hr' | 'employee' | 'intern'>;
     const phoneKey = `+91${mobile}`;
 
     // Attempt to register in Firebase Auth if available, with graceful fallback to generated UID
@@ -57,7 +73,8 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    const employeeId = `GSS_${role === 'intern' ? 'INT' : 'EMP'}_${uid}`;
+    const rolePrefix = role === 'intern' ? 'INT' : role === 'hr' ? 'HR' : role === 'admin' ? 'ADM' : 'EMP';
+    const employeeId = `GSS_${rolePrefix}_${uid}`;
     const userRef = db.collection('users').doc(uid);
     const phoneRef = db.collection('phoneIndex').doc(phoneKey);
     const projectionRef = db.collection('projection_jobs').doc(`staff:${uid}:created`);

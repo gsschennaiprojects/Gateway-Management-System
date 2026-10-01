@@ -26,4 +26,42 @@ describe('POST /api/auth/register', () => {
     expect(db.runTransaction).toHaveBeenCalled();
     expect(JSON.stringify(await response.json())).not.toMatch(/passwordHash|secret123/);
   });
+
+  it('allows registration with HR role and sets GSS_HR_ prefix', async () => {
+    let createdUser: Record<string, unknown> = {};
+    const transaction = {
+      get: jest.fn().mockResolvedValue({ exists: false }),
+      create: jest.fn((_ref, data) => {
+        if (data.role) createdUser = data;
+      }),
+    };
+    const db = {
+      collection: jest.fn(() => ({ doc: jest.fn((id: string) => ({ id })) })),
+      runTransaction: jest.fn(async (fn) => fn(transaction)),
+    };
+    const auth = { createUser: jest.fn().mockResolvedValue({ uid: 'hr-uid' }) };
+    (getAdminFirestore as jest.Mock).mockReturnValue(db);
+    (getAdminAuth as jest.Mock).mockReturnValue(auth);
+
+    const request = new NextRequest('http://localhost/api/auth/register', {
+      method: 'POST',
+      headers: { origin: 'http://localhost', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Srinithi S',
+        email: 'gateway.srinithi@gmail.com',
+        mobile: '9003580181',
+        requestedRole: 'hr',
+        branch: 'Chennai',
+        specializations: ['HR operation', 'Gen AI'],
+        startMonthYear: '2026-05',
+        password: 'Password123#',
+      }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(201);
+    expect(createdUser.role).toBe('hr');
+    expect(createdUser.employeeId).toBe('GSS_HR_hr-uid');
+    expect(createdUser.name).toBe('Srinithi S');
+  });
 });
