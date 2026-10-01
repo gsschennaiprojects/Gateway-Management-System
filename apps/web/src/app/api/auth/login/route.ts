@@ -103,7 +103,15 @@ export async function POST(request: NextRequest) {
     // 6. Set signed session cookie
     await setSessionCookie(safeUser);
 
-    // 7. Non-blocking audit log
+    // 7. Auto-register staff attendance as present on login
+    try {
+      const { registerStaffAttendanceOnLogin } = await import('@/lib/attendance/auto-attendance-service');
+      await registerStaffAttendanceOnLogin(safeUser);
+    } catch (attErr) {
+      console.warn('[Login] Auto-attendance registration warning:', attErr);
+    }
+
+    // 8. Non-blocking audit log
     import('@/lib/audit/audit-service').then(({ logAuditEvent }) => {
       logAuditEvent({
         userId: safeUser.id,

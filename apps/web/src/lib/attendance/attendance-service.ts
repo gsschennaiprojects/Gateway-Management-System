@@ -8,6 +8,7 @@
 
 import { getAdminFirestore, getFirestoreUsers, getFirestoreWorklogs } from '../firebase/firebase-admin';
 import { logAuditEvent } from '../audit/audit-service';
+import { getLiveDateInfo } from '../worklogs/worklog-session-utils';
 import type { UserRole } from '@/types/auth';
 
 export interface StaffAttendanceDayStatus {
@@ -102,21 +103,24 @@ export async function getFirestoreStaffAttendanceGrid(params: {
     const day = parseInt(log.date.split('-')[2], 10);
     if (!isNaN(day)) {
       const st = (log.attendanceStatus as string) || '';
-      const mappedStatus: 'present' | 'absent' | 'holiday' | 'half_day' | 'late' =
-        st === 'late'
-          ? 'late'
-          : st === 'half_day' || st === 'half-day'
-            ? 'half_day'
-            : st === 'holiday'
-              ? 'holiday'
-              : st === 'absent'
-                ? 'absent'
-                : (log.loginTime ? 'present' : 'present');
+      // Only record day status if user actually logged in or had an explicit status
+      if (log.loginTime || (st && st !== '')) {
+        const mappedStatus: 'present' | 'absent' | 'holiday' | 'half_day' | 'late' =
+          st === 'late'
+            ? 'late'
+            : st === 'half_day' || st === 'half-day'
+              ? 'half_day'
+              : st === 'holiday'
+                ? 'holiday'
+                : st === 'absent'
+                  ? 'absent'
+                  : 'present';
 
-      userPunch.dayStatuses.set(day, mappedStatus);
+        userPunch.dayStatuses.set(day, mappedStatus);
+      }
 
       // If log is today
-      const todayDateStr = new Date().toISOString().slice(0, 10);
+      const todayDateStr = getLiveDateInfo().isoDate;
       if (log.date === todayDateStr) {
         userPunch.punchIn = log.loginTime || undefined;
         userPunch.punchOut = log.logoutTime || undefined;
