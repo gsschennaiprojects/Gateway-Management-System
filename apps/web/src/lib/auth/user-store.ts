@@ -2,6 +2,8 @@ import { StoredUser, INITIAL_USERS } from './mock-users';
 import { RegisterPayload, User, Branch, UserRole } from '@/types/auth';
 import { hashPassword } from './password';
 
+import { generateCustomUserId } from './user-id-generator';
+
 // In-memory runtime store for server-side route handlers
 const serverUsers: StoredUser[] = [...INITIAL_USERS];
 
@@ -19,41 +21,25 @@ export function findUserByIdentifier(identifier: string): StoredUser | undefined
   const digitsOnly = identifier.replace(/\D/g, '');
 
   return serverUsers.find((u) => {
+    const idMatch = (u.id && u.id.toLowerCase() === cleanId) || (u.employeeId && u.employeeId.toLowerCase() === cleanId);
     const emailMatch = u.email.toLowerCase() === cleanId;
     const phoneMatch = digitsOnly.length >= 10 && u.mobile.replace(/\D/g, '').endsWith(digitsOnly.slice(-10));
-    return emailMatch || phoneMatch;
+    return idMatch || emailMatch || phoneMatch;
   });
 }
 
 export function findUserById(id: string): StoredUser | undefined {
-  return serverUsers.find((u) => u.id === id);
+  return serverUsers.find((u) => u.id === id || u.employeeId === id);
 }
 
 export function generateProfessionalUserId(role?: string, existingUsers?: StoredUser[]): string {
-  const roleLower = (role || '').toLowerCase();
-  let prefix = 'GSS_EMP_';
-  if (roleLower === 'superadmin') prefix = 'GSS_SA_';
-  else if (roleLower === 'admin') prefix = 'GSS_ADM_';
-  else if (roleLower === 'hr') prefix = 'GSS_HR_';
-  else if (roleLower === 'intern') prefix = 'GSS_INT_';
-  else if (roleLower === 'employee') prefix = 'GSS_EMP_';
-
   const list = existingUsers || serverUsers;
-  let maxSeq = 0;
-  const regex = new RegExp(`^${prefix}(\\d+)$`);
-
+  const existingIds = new Set<string>();
   for (const u of list) {
-    const match = (u.id || '').match(regex);
-    if (match) {
-      const seq = parseInt(match[1], 10);
-      if (!isNaN(seq) && seq > maxSeq) {
-        maxSeq = seq;
-      }
-    }
+    if (u.id) existingIds.add(u.id);
+    if (u.employeeId) existingIds.add(u.employeeId);
   }
-
-  const nextSeq = maxSeq + 1;
-  return `${prefix}${String(nextSeq).padStart(3, '0')}`;
+  return generateCustomUserId(role || 'employee', existingIds);
 }
 
 export function createUser(payload: RegisterPayload & { id?: string }): StoredUser {

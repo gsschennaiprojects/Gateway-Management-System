@@ -216,13 +216,13 @@ export async function PATCH(request: NextRequest) {
         transaction.update(profileRef, updates);
         if (nextMobile !== previousMobile) {
           if (previousPhone?.exists && previousPhone.data()?.uid === uid) transaction.delete(previousPhoneRef);
-          transaction.set(nextPhoneRef, { uid, employeeId: target.id, updatedAt: now });
+          transaction.set(nextPhoneRef, { uid, employeeId: target.employeeId || target.id, updatedAt: now });
         }
         transaction.create(jobRef, { id: jobRef.id, type: 'staff.upsert', entityId: uid, branchId, state: 'pending', attempts: 0, createdAt: now });
         transaction.create(auditRef, {
           id: auditId, timestamp: now, createdAt: now,
           userId: session.user.id, userName: session.user.name, role: session.user.role,
-          action: `USER_${String(input.action).toUpperCase()}`, module: 'STAFF', recordId: target.id, branch,
+          action: `USER_${String(input.action).toUpperCase()}`, module: 'STAFF', recordId: target.employeeId || target.id, branch,
           newValue: JSON.stringify({ role: nextRole, status: nextStatus, branch }),
         });
         transaction.create(auditProjectionRef, { id: auditProjectionRef.id, type: 'audit.project', entityId: auditId, branchId, state: 'pending', attempts: 0, createdAt: now });

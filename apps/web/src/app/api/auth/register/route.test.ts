@@ -27,7 +27,7 @@ describe('POST /api/auth/register', () => {
     expect(JSON.stringify(await response.json())).not.toMatch(/passwordHash|secret123/);
   });
 
-  it('allows registration with HR role and sets GSS_HR_ prefix', async () => {
+  it('allows registration with HR role and sets GSSHR prefix with 3 random digits', async () => {
     let createdUser: Record<string, unknown> = {};
     const transaction = {
       get: jest.fn().mockResolvedValue({ exists: false }),
@@ -61,7 +61,7 @@ describe('POST /api/auth/register', () => {
     const response = await POST(request);
     expect(response.status).toBe(201);
     expect(createdUser.role).toBe('hr');
-    expect(createdUser.employeeId).toBe('GSS_HR_hr-uid');
+    expect(createdUser.employeeId).toMatch(/^GSSHR\d{3}$/);
     expect(createdUser.name).toBe('Srinithi S');
   });
 });

@@ -73,8 +73,8 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    const rolePrefix = role === 'intern' ? 'INT' : role === 'hr' ? 'HR' : role === 'admin' ? 'ADM' : 'EMP';
-    const employeeId = `GSS_${rolePrefix}_${uid}`;
+    const { generateUniqueCustomUserId } = await import('@/lib/auth/user-id-generator');
+    const employeeId = await generateUniqueCustomUserId(role);
     const userRef = db.collection('users').doc(uid);
     const phoneRef = db.collection('phoneIndex').doc(phoneKey);
     const projectionRef = db.collection('projection_jobs').doc(`staff:${uid}:created`);

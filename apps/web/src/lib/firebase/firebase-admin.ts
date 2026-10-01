@@ -108,6 +108,7 @@ function mapFirestoreUser(id: string, data: Record<string, unknown>): UserAuthRe
   const primarySpecialization = asString(data.specialization || data.designation, 'Operations');
   return {
     id: asString(data.employeeId, id),
+    employeeId: asString(data.employeeId, id),
     uid: asString(data.uid, id),
     name: asString(data.name, 'Staff Member'),
     email: asString(data.email || data.gmail),
@@ -333,6 +334,7 @@ export async function getFirestoreUserByUid(uid: string): Promise<User | null> {
     if (!['Coimbatore', 'Chennai', 'Madurai', 'Erode'].includes(branch)) return null;
     return {
       id: asString(data.employeeId, snapshot.id),
+      employeeId: asString(data.employeeId, snapshot.id),
       uid: asString(data.uid, snapshot.id),
       name: asString(data.name), email: asString(data.email || data.gmail),
       mobile: asString(data.mobile), role, status: status as UserStatus,
@@ -350,6 +352,8 @@ export async function getFirestoreUserByUid(uid: string): Promise<User | null> {
  */
 export async function syncUserToFirestore(userData: {
   id: string;
+  employeeId?: string;
+  uid?: string;
   name: string;
   email: string;
   mobile?: string;
@@ -369,9 +373,11 @@ export async function syncUserToFirestore(userData: {
   if (!db) return false;
 
   try {
-    const docRef = db.collection('users').doc(userData.id);
+    const userKey = userData.uid || userData.id;
+    const docRef = db.collection('users').doc(userKey);
     await docRef.set({
-      uid: userData.id,
+      uid: userKey,
+      employeeId: userData.employeeId || userData.id,
       name: userData.name,
       email: userData.email.toLowerCase(),
       gmail: userData.email.toLowerCase(),
@@ -595,41 +601,11 @@ export async function getFirestoreUserById(id: string): Promise<UserAuthRecord |
 }
 
 /**
- * Generates the next sequential professional User ID (e.g. GSS_SA_001, GSS_ADM_001, GSS_HR_001, GSS_EMP_001, GSS_INT_001).
+ * Generates the next unique custom User ID (e.g. GSSSA204, GSSADM582, GSSHR109, GSSEMP348, GSSINT315).
  */
 export async function getNextProfessionalUserId(role?: string): Promise<string> {
-  const roleLower = (role || '').toLowerCase();
-  let prefix = 'GSS_EMP_';
-  if (roleLower === 'superadmin') prefix = 'GSS_SA_';
-  else if (roleLower === 'admin') prefix = 'GSS_ADM_';
-  else if (roleLower === 'hr') prefix = 'GSS_HR_';
-  else if (roleLower === 'intern') prefix = 'GSS_INT_';
-  else if (roleLower === 'employee') prefix = 'GSS_EMP_';
-
-  const db = getAdminFirestore();
-  let maxSeq = 0;
-  const regex = new RegExp(`^${prefix}(\\d+)$`);
-
-  if (db) {
-    try {
-      const snap = await db.collection('users').get();
-      for (const doc of snap.docs) {
-        const id = doc.id;
-        const match = id.match(regex);
-        if (match) {
-          const seq = parseInt(match[1], 10);
-          if (!isNaN(seq) && seq > maxSeq) {
-            maxSeq = seq;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[FirebaseAdmin] Error determining next user ID:', err);
-    }
-  }
-
-  const nextSeq = maxSeq + 1;
-  return `${prefix}${String(nextSeq).padStart(3, '0')}`;
+  const { generateUniqueCustomUserId } = await import('@/lib/auth/user-id-generator');
+  return generateUniqueCustomUserId(role || 'employee');
 }
 
 /**
@@ -658,6 +634,12 @@ export async function getFirestoreUserByIdentifier(identifier: string): Promise<
     const directDoc = await db.collection('users').doc(identifier).get();
     if (directDoc.exists) {
       return mapFirestoreUser(directDoc.id, directDoc.data()!);
+    }
+
+    // 1b. Check employeeId directly (e.g. GSSEMP348, GSSHR109)
+    const byEmployeeId = await db.collection('users').where('employeeId', '==', identifier).limit(1).get();
+    if (!byEmployeeId.empty) {
+      return mapFirestoreUser(byEmployeeId.docs[0].id, byEmployeeId.docs[0].data());
     }
 
     // 2. Query email

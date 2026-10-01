@@ -17,6 +17,8 @@ export async function GET() {
     if (dbUser) {
       currentUser = {
         ...session.user,
+        id: dbUser.id || session.user.id,
+        employeeId: dbUser.employeeId || session.user.employeeId,
         name: dbUser.name || session.user.name,
         email: dbUser.email || session.user.email,
         mobile: dbUser.mobile || session.user.mobile,
@@ -33,6 +35,8 @@ export async function GET() {
       if (memUser) {
         currentUser = {
           ...session.user,
+          id: memUser.id || session.user.id,
+          employeeId: memUser.employeeId || session.user.employeeId,
           name: memUser.name,
           email: memUser.email,
           mobile: memUser.mobile,

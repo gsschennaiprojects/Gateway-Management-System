@@ -82,6 +82,7 @@ export async function POST(request: NextRequest) {
     // 5. Construct safe user profile without credentials
     const safeUser: User = {
       id: profile.id,
+      employeeId: profile.employeeId || profile.id,
       uid: profile.uid || profile.id,
       name: profile.name,
       email: profile.email,

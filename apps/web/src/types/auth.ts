@@ -67,6 +67,7 @@ export type Specialization = string;
  */
 export interface User {
   id: string;
+  employeeId?: string;
   uid?: string;
   name: string;
   email: string;
