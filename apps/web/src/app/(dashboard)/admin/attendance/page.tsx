@@ -17,6 +17,10 @@ import {
   Clock,
   Sparkles,
   RotateCcw,
+  Archive,
+  Database,
+  Layers,
+  X,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
 import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
@@ -56,6 +60,20 @@ export default function AttendanceMasterGridPage() {
   const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [downloadingFormat, setDownloadingFormat] = useState<'excel' | 'docx' | null>(null);
+  const [isRolloverModalOpen, setIsRolloverModalOpen] = useState(false);
+  const [isExecutingRollover, setIsExecutingRollover] = useState(false);
+  const [rolloverNotice, setRolloverNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    details?: {
+      archivedAttendanceCount?: number;
+      archivedWorklogCount?: number;
+      initializedStaffCount?: number;
+      branchesUpdated?: string[];
+      previousPeriod?: { monthName: string };
+      currentPeriod?: { monthName: string };
+    };
+  } | null>(null);
 
   // Set default branch based on current user role
   useEffect(() => {
@@ -279,6 +297,37 @@ export default function AttendanceMasterGridPage() {
     }
   };
 
+  // Perform Month Rollover & Firestore Archiving
+  const handlePerformMonthRollover = async () => {
+    setIsExecutingRollover(true);
+    setRolloverNotice(null);
+    try {
+      const res = await fetch('/api/admin/rollover-month', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to complete month rollover and archiving.');
+      }
+      setRolloverNotice({
+        type: 'success',
+        message: data.result?.message || 'Previous month successfully archived to separate collections and new month initialized.',
+        details: data.result,
+      });
+      // Refresh current attendance grid to reflect latest state
+      await loadAttendanceData();
+    } catch (err: unknown) {
+      setRolloverNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Month rollover failed.',
+      });
+    } finally {
+      setIsExecutingRollover(false);
+    }
+  };
+
   // Export Excel (.xlsx) with Live Date
   const handleExportExcel = () => {
     setDownloadingFormat('excel');
@@ -448,6 +497,18 @@ export default function AttendanceMasterGridPage() {
           >
             Print
           </Button>
+
+          {isSuperAdmin && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => { setIsRolloverModalOpen(true); setRolloverNotice(null); }}
+              leftIcon={<Archive className="w-3.5 h-3.5 text-blue-600" />}
+              className="text-xs"
+            >
+              Month Archive & Rollover
+            </Button>
+          )}
 
           <Button
             variant="secondary"
@@ -759,6 +820,114 @@ export default function AttendanceMasterGridPage() {
           </table>
         </div>
       </div>
+
+      {/* Month Rollover & Firestore Archiving Modal */}
+      {isRolloverModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-[var(--bg-card,#FFFFFF)] border border-[var(--border-card,#DADCE0)] rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative space-y-5 animate-panel-entrance text-[var(--text-primary,#1F1F1F)]">
+            <button
+              type="button"
+              onClick={() => setIsRolloverModalOpen(false)}
+              className="absolute top-5 right-5 text-[var(--text-muted,#70757A)] hover:text-[var(--text-primary,#1F1F1F)] p-1 rounded-full hover:bg-[var(--bg-card-subtle,#F1F3F4)] transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Archive className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[var(--text-primary,#1F1F1F)]">
+                  Monthly Rollover & Archive Console
+                </h3>
+                <p className="text-xs text-[var(--text-secondary,#5F6368)]">
+                  Permanent monthly snapshotting to separate Firestore collections
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs leading-relaxed">
+              <div className="p-3.5 rounded-2xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-subtle,#E8EAED)] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--text-secondary,#5F6368)]">Active Calendar Period:</span>
+                  <span className="font-semibold text-[var(--brand-primary,#1A73E8)]">{currentMonthTitle}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--text-secondary,#5F6368)]">Target Attendance Archive:</span>
+                  <span className="font-mono text-[11px] bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                    monthly_attendance_archives
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[var(--text-secondary,#5F6368)]">Target Worklogs Archive:</span>
+                  <span className="font-mono text-[11px] bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
+                    monthly_worklog_archives
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 text-xs">
+                <p className="font-semibold mb-1">Actions performed on rollover:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                  <li>Computes complete attendance percentage, working hours & punch matrix for every employee.</li>
+                  <li>Archives all completed worklogs and deliverables into separate Firestore archive collection.</li>
+                  <li>Initializes fresh month grids in <strong>staff_attendance</strong> across all 4 branches.</li>
+                  <li>Synchronizes <strong>branch_metrics</strong> and updates global <strong>systemConfig/monthly_state</strong>.</li>
+                </ul>
+              </div>
+            </div>
+
+            {rolloverNotice && (
+              <div
+                className={`p-3.5 rounded-2xl text-xs border flex items-start gap-2.5 ${
+                  rolloverNotice.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800'
+                    : 'bg-red-50 text-red-900 border-red-200 dark:bg-red-950/40 dark:text-red-200 dark:border-red-800'
+                }`}
+              >
+                {rolloverNotice.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p className="font-medium">{rolloverNotice.message}</p>
+                  {rolloverNotice.details && (
+                    <div className="mt-2 text-[11px] font-mono grid grid-cols-2 gap-1.5 pt-1.5 border-t border-emerald-200 dark:border-emerald-800">
+                      <div>Archived Attendance: <strong>{rolloverNotice.details.archivedAttendanceCount}</strong></div>
+                      <div>Archived Worklogs: <strong>{rolloverNotice.details.archivedWorklogCount}</strong></div>
+                      <div>Staff Initialized: <strong>{rolloverNotice.details.initializedStaffCount}</strong></div>
+                      <div>Branches: <strong>{rolloverNotice.details.branchesUpdated?.join(', ')}</strong></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsRolloverModalOpen(false)}
+                disabled={isExecutingRollover}
+              >
+                Close
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handlePerformMonthRollover}
+                isLoading={isExecutingRollover}
+                leftIcon={<Database className="w-4 h-4" />}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Run Archive & Rollover
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

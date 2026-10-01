@@ -33,7 +33,7 @@ interface AuthContextType {
   isLogoutModalOpen: boolean;
   isLoggingOut: boolean;
   quickLogin: (identifier: string) => Promise<boolean>;
-  refreshSession: () => Promise<void>;
+  refreshSession: () => Promise<User | null>;
 }
 
 interface AuthApiResponse {
@@ -53,24 +53,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const router = useRouter();
 
-  const refreshSession = useCallback(async () => {
+  const refreshSession = useCallback(async (): Promise<User | null> => {
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await fetch('/api/auth/me', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.user) {
           setUser(data.user);
+          return data.user as User;
         } else {
           setUser(null);
+          return null;
         }
       } else if (res.status === 401) {
         setUser(null);
+        return null;
       }
     } catch {
       // No client-side profile cache is trusted as authentication state.
     } finally {
       setLoading(false);
     }
+    return null;
   }, []);
 
   useEffect(() => {

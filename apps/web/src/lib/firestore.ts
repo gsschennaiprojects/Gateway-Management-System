@@ -35,6 +35,7 @@ export const COLLECTIONS = {
   BRANCHES: 'branches',
   DAILY_WORKLOGS: 'daily_worklogs',
   ATTENDANCE: 'attendance',
+  STAFF_ATTENDANCE: 'staff_attendance',
   CANDIDATE_LEADS: 'candidate_leads',
   SYSTEM_CONFIG: 'systemConfig',
   COURSES: 'courses',
@@ -43,6 +44,8 @@ export const COLLECTIONS = {
   LEAVE_REQUESTS: 'leave_requests',
   ANNOUNCEMENTS: 'announcements',
   BRANCH_METRICS: 'branch_metrics',
+  MONTHLY_ATTENDANCE_ARCHIVES: 'monthly_attendance_archives',
+  MONTHLY_WORKLOG_ARCHIVES: 'monthly_worklog_archives',
 } as const;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -552,5 +555,93 @@ export async function getBranchLeads(branchId: string): Promise<GSSCandidateLead
     orderBy('dateReceived', 'desc'),
     limit(100),
   ]);
+}
+
+// ─── Monthly Archive Types & Operations ──────────────────────────────────────
+
+export interface GSSMonthlyAttendanceArchive {
+  id?: string;
+  archiveId: string;
+  staffId: string;
+  employeeId: string;
+  employeeName: string;
+  email?: string;
+  branch: string;
+  branchCode: string;
+  role: string;
+  year: number;
+  month: number;
+  monthName: string;
+  totalCalendarDays: number;
+  totalWorkingDays: number;
+  presentDays: number;
+  lateDays: number;
+  halfDays: number;
+  absentDays: number;
+  holidayDays: number;
+  attendanceRate: number;
+  punctualityRate: number;
+  totalHoursWorked: number;
+  averageHoursPerDay: number;
+  attendanceGrid: Record<number, 'present' | 'absent' | 'holiday' | 'half_day' | 'late'>;
+  dailyRecords: Array<{
+    day: number;
+    date: string;
+    status: 'present' | 'absent' | 'holiday' | 'half_day' | 'late';
+    punchIn?: string;
+    punchOut?: string;
+    totalHours?: number;
+  }>;
+  archivedAt: string;
+  archivedBy: {
+    id: string;
+    name: string;
+    role: string;
+  };
+  status: 'FINALIZED';
+}
+
+export interface GSSMonthlyWorklogArchive {
+  id?: string;
+  archiveId: string;
+  staffId: string;
+  employeeId: string;
+  employeeName: string;
+  branch: string;
+  role: string;
+  year: number;
+  month: number;
+  monthName: string;
+  totalWorklogsCount: number;
+  totalTasksCompleted: number;
+  totalTasksPending: number;
+  totalHoursLogged: number;
+  completedTasksSummary: string[];
+  worklogs: Array<{
+    logId: string;
+    date: string;
+    loginTime: string;
+    logoutTime?: string;
+    tasksCompleted: string[];
+    tasksPending: string[];
+    incompleteReason?: string;
+    totalHours?: number;
+    verifiedBy?: string;
+  }>;
+  archivedAt: string;
+  archivedBy: {
+    id: string;
+    name: string;
+    role: string;
+  };
+  status: 'FINALIZED';
+}
+
+export async function createMonthlyAttendanceArchive(docId: string, archive: GSSMonthlyAttendanceArchive): Promise<void> {
+  await createDocument(COLLECTIONS.MONTHLY_ATTENDANCE_ARCHIVES, docId, archive);
+}
+
+export async function createMonthlyWorklogArchive(docId: string, archive: GSSMonthlyWorklogArchive): Promise<void> {
+  await createDocument(COLLECTIONS.MONTHLY_WORKLOG_ARCHIVES, docId, archive);
 }
 

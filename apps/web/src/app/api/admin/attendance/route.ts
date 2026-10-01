@@ -28,6 +28,16 @@ export async function GET(req: NextRequest) {
     const requestedBranch = searchParams.get('branch') || undefined;
     const branch = session.user.role === 'superadmin' ? (requestedBranch || 'All') : session.user.branch;
 
+    // Automatically check and execute month rollover if calendar month has changed
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const { checkAndAutoExecuteMonthRollover } = await import('@/lib/attendance/month-rollover-service');
+        void checkAndAutoExecuteMonthRollover().catch(() => {});
+      } catch {
+        // Non-blocking
+      }
+    }
+
     const { records, lastUpdated } = await getFirestoreStaffAttendanceGrid({
       year,
       month,

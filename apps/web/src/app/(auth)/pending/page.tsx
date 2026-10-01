@@ -1,24 +1,57 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { useAuth } from '@/context/AuthContext';
-import { Clock, RotateCw, LogOut } from 'lucide-react';
+import { Clock, RotateCw, LogOut, CheckCircle2, AlertCircle, Info } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function PendingApprovalPage() {
   const { user, refreshSession, logout } = useAuth();
   const [isChecking, setIsChecking] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'info' | 'success' | 'error'; message: string } | null>(null);
   const router = useRouter();
+
+  // Redirect immediately if already active
+  useEffect(() => {
+    if (user && user.status === 'active') {
+      const target = user.role === 'superadmin' ? '/admin/users' : user.role === 'admin' ? '/admin/directory' : user.role === 'hr' ? '/leads' : '/dashboard';
+      router.replace(target);
+    }
+  }, [user, router]);
 
   const handleCheckStatus = async () => {
     setIsChecking(true);
-    await refreshSession();
-    setIsChecking(false);
+    setFeedback(null);
+    try {
+      const freshUser = await refreshSession();
 
-    if (user && user.status === 'active') {
-      router.push('/dashboard');
+      if (freshUser && freshUser.status === 'active') {
+        setFeedback({ type: 'success', message: 'Account approved by Super Admin! Opening workspace...' });
+        const target = freshUser.role === 'superadmin'
+          ? '/admin/users'
+          : freshUser.role === 'admin'
+            ? '/admin/directory'
+            : freshUser.role === 'hr'
+              ? '/leads'
+              : '/dashboard';
+
+        setTimeout(() => {
+          router.replace(target);
+        }, 500);
+        return;
+      }
+
+      if (freshUser && (freshUser.status === 'rejected' || (freshUser.status as string) === 'disabled')) {
+        setFeedback({ type: 'error', message: 'Your application was rejected or disabled. Please contact the Super Administrator.' });
+      } else {
+        setFeedback({ type: 'info', message: 'Application is still under review by Super Admin. Please check back shortly.' });
+      }
+    } catch {
+      setFeedback({ type: 'error', message: 'Could not connect to verify status. Please check your internet connection and retry.' });
+    } finally {
+      setIsChecking(false);
     }
   };
 
@@ -63,6 +96,23 @@ export default function PendingApprovalPage() {
               <span className="text-[var(--text-secondary)]">Requested Role:</span>
               <span className="uppercase text-[var(--badge-warning-text)] font-semibold">{user.role}</span>
             </div>
+          </div>
+        )}
+
+        {feedback && (
+          <div
+            className={`my-4 p-3 rounded-xl text-xs flex items-center gap-2.5 text-left border ${
+              feedback.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                : feedback.type === 'error'
+                  ? 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800'
+                  : 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800'
+            }`}
+          >
+            {feedback.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+            {feedback.type === 'error' && <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />}
+            {feedback.type === 'info' && <Info className="w-4 h-4 text-blue-600 shrink-0" />}
+            <span>{feedback.message}</span>
           </div>
         )}
 
