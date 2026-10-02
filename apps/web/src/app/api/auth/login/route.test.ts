@@ -12,6 +12,9 @@ jest.mock('@/lib/auth/login-rate-limit', () => ({ checkLoginRateLimit: jest.fn()
 jest.mock('@/lib/attendance/auto-attendance-service', () => ({
   registerStaffAttendanceOnLogin: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('@/lib/attendance/month-rollover-service', () => ({
+  checkAndAutoExecuteMonthRollover: jest.fn().mockResolvedValue({ triggered: false }),
+}));
 
 const request = (body: unknown) => new NextRequest('http://localhost/api/auth/login', {
   method: 'POST', headers: { origin: 'http://localhost', 'content-type': 'application/json' }, body: JSON.stringify(body),
@@ -35,12 +38,12 @@ describe('POST /api/auth/login', () => {
     (getFirestoreUserByIdentifier as jest.Mock).mockResolvedValue(profile);
   });
 
-  it('verifies credentials and creates a secure session', async () => {
+  it('verifies credentials and creates a secure session without auto-punching attendance', async () => {
     const { registerStaffAttendanceOnLogin } = await import('@/lib/attendance/auto-attendance-service');
     const response = await POST(request({ identifier: profile.email, password: 'secret-password' }));
     expect(response.status).toBe(200);
     expect(setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ id: 'EMP-1', email: profile.email }));
-    expect(registerStaffAttendanceOnLogin).toHaveBeenCalledWith(expect.objectContaining({ id: 'EMP-1', email: profile.email }));
+    expect(registerStaffAttendanceOnLogin).not.toHaveBeenCalled();
   });
 
   it('uses the same public error for unknown account and incorrect password', async () => {

@@ -103,13 +103,13 @@ export async function POST(request: NextRequest) {
     // 6. Set signed session cookie
     await setSessionCookie(safeUser);
 
-    // 7. Auto-register staff attendance as present on login
-    try {
-      const { registerStaffAttendanceOnLogin } = await import('@/lib/attendance/auto-attendance-service');
-      await registerStaffAttendanceOnLogin(safeUser);
-    } catch (attErr) {
-      console.warn('[Login] Auto-attendance registration warning:', attErr);
-    }
+    // 7. Proactive Month-End Rollover Check (Non-blocking background execution)
+    // Note: Staff attendance is NOT auto-punched here. Staff must enter planned tasks and explicitly click "Log In (Punch In)"
+    import('@/lib/attendance/month-rollover-service').then(({ checkAndAutoExecuteMonthRollover }) => {
+      checkAndAutoExecuteMonthRollover().catch(err => {
+        console.warn('[Login] Background rollover check warning:', err);
+      });
+    }).catch(() => {});
 
     // 8. Non-blocking audit log
     import('@/lib/audit/audit-service').then(({ logAuditEvent }) => {
