@@ -39,7 +39,10 @@ export default function RegisterPage() {
   const [selectedDomains, setSelectedDomains] = useState<string[]>(['Gen AI']);
   const [customDomainInput, setCustomDomainInput] = useState('');
 
-  const [startMonthYear, setStartMonthYear] = useState('2026-09');
+  const [startMonthYear, setStartMonthYear] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);

@@ -9,6 +9,7 @@ export interface LiveDateInfo {
   sheetDate: string;      // "23-09-2026"
   dayOfWeek: string;      // "Wednesday"
   shortDay: string;       // "Wed"
+  shortMonth: string;     // "Sep"
   formattedDate: string;  // "23 Sep 2026"
   fullDate: string;       // "Wednesday, September 23, 2026"
   monthName: string;      // "September 2026"
@@ -53,6 +54,7 @@ export function getLiveDateInfo(referenceDate?: Date): LiveDateInfo {
   
   const dayOfWeek = d.toLocaleDateString('en-US', { timeZone, weekday: 'long' });
   const shortDay = d.toLocaleDateString('en-US', { timeZone, weekday: 'short' });
+  const shortMonth = d.toLocaleDateString('en-US', { timeZone, month: 'short' });
   const formattedDate = d.toLocaleDateString('en-GB', { timeZone, day: '2-digit', month: 'short', year: 'numeric' });
   const fullDate = d.toLocaleDateString('en-US', { timeZone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const monthName = d.toLocaleDateString('en-US', { timeZone, month: 'long', year: 'numeric' });
@@ -63,6 +65,7 @@ export function getLiveDateInfo(referenceDate?: Date): LiveDateInfo {
     sheetDate: `${dd}-${mm}-${yyyy}`,
     dayOfWeek,
     shortDay,
+    shortMonth,
     formattedDate,
     fullDate,
     monthName,

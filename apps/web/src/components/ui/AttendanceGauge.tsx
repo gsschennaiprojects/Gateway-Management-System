@@ -12,12 +12,12 @@ interface AttendanceGaugeProps {
 }
 
 export function AttendanceGauge({
-  percentage = 92.5,
-  presentDays = 21,
-  absentDays = 2,
-  holidayDays = 3,
-  workingDaysTotal = 23,
-  monthName = 'September 2026',
+  percentage = 0,
+  presentDays = 0,
+  absentDays = 0,
+  holidayDays = 0,
+  workingDaysTotal = 0,
+  monthName = '',
   size = 'normal',
 }: AttendanceGaugeProps) {
   // Semi-circle gauge calculation
@@ -76,7 +76,7 @@ export function AttendanceGauge({
           </h2>
         </div>
         <div className="px-3.5 py-1 rounded-full bg-[var(--bg-card-subtle,#F1F3F4)] text-xs font-medium text-[var(--text-secondary,#444746)] border border-[var(--border-subtle,#E8EAED)]">
-          Total Cycle: 26 Working Days
+          Total Cycle: {workingDaysTotal} Working Days
         </div>
       </div>
 

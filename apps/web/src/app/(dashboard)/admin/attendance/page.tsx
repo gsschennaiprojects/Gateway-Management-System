@@ -645,8 +645,8 @@ export default function AttendanceMasterGridPage() {
           )}
         </div>
 
-        {/* Branch Filter for Super Admin */}
-        {isSuperAdmin && (
+        {/* Branch Filter for Super Admin or Badge for Branch Admin/HR */}
+        {isSuperAdmin ? (
           <div className="flex items-center gap-2">
             <Building2 className="w-4 h-4 text-[var(--text-muted,#747775)]" />
             <select
@@ -661,6 +661,11 @@ export default function AttendanceMasterGridPage() {
                 </option>
               ))}
             </select>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold">
+            <Building2 className="w-3.5 h-3.5 text-slate-500" />
+            <span>Branch: {currentUser?.branch || 'All'}</span>
           </div>
         )}
 

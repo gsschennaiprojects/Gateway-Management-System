@@ -18,6 +18,8 @@ import {
   Printer,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
+import { useAuth } from '@/context/AuthContext';
+import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
 
 interface CandidateLead {
   id: string;
@@ -32,6 +34,8 @@ interface CandidateLead {
 const INITIAL_LEADS: CandidateLead[] = [];
 
 export default function LeadsDashboardPage() {
+  const { user: currentUser } = useAuth();
+  const liveDate = getLiveDateInfo();
   const [leads, setLeads] = useState<CandidateLead[]>(INITIAL_LEADS);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -109,10 +113,10 @@ export default function LeadsDashboardPage() {
         filename: `GSS_Candidate_Leads_${new Date().toISOString().substring(0, 10)}`,
         title: 'Candidate Leads & Inquiries Report',
         subtitle: 'HR Candidate Intake & Enrollment Pipeline Summary',
-        period: 'September 2026',
-        branch: 'Coimbatore',
-        staffName: 'HR Talent Acquisition',
-        staffRole: 'HR',
+        period: `${liveDate.monthName} ${liveDate.year}`,
+        branch: currentUser?.branch || 'Universal',
+        staffName: currentUser?.name || 'HR Operations',
+        staffRole: currentUser?.role?.toUpperCase() || 'HR',
         sections: [
           {
             heading: '1. Candidate Inquiry Pipeline',

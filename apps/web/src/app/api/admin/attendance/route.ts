@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401, headers: PRIVATE_HEADERS });
   }
 
-  if (!['superadmin', 'admin'].includes(session.user.role)) {
+  if (!['superadmin', 'admin', 'hr'].includes(session.user.role)) {
     return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403, headers: PRIVATE_HEADERS });
   }
 
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401, headers: PRIVATE_HEADERS });
   }
 
-  if (!['superadmin', 'admin'].includes(session.user.role)) {
+  if (!['superadmin', 'admin', 'hr'].includes(session.user.role)) {
     return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403, headers: PRIVATE_HEADERS });
   }
 
@@ -94,10 +94,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Records array is required' }, { status: 400, headers: PRIVATE_HEADERS });
     }
 
+    let recordsToSave = records;
+    if (session.user.role !== 'superadmin') {
+      const { getFirestoreUsers } = await import('@/lib/firebase/firebase-admin');
+      const allUsers = await getFirestoreUsers();
+      const branchUserIds = new Set(
+        allUsers
+          .filter((u) => u.branch.toLowerCase() === session.user.branch.toLowerCase())
+          .map((u) => u.id)
+      );
+      recordsToSave = records.filter((r: { staffId?: string }) => r.staffId && (branchUserIds.has(r.staffId) || r.staffId === session.user.id));
+    }
+
     const { count, updatedAt } = await saveFirestoreStaffAttendanceGrid({
       year,
       month,
-      records,
+      records: recordsToSave,
       actor: {
         id: session.user.id,
         name: session.user.name,

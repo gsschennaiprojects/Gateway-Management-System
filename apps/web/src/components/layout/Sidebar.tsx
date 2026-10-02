@@ -49,7 +49,7 @@ export const NAV_ITEMS: NavItem[] = [
     shortLabel: 'Home',
     href: '/dashboard',
     icon: <LayoutDashboard className="w-5 h-5" />,
-    allowedRoles: ['employee', 'intern', 'admin', 'superadmin']
+    allowedRoles: ['employee', 'intern', 'admin', 'superadmin', 'hr']
   },
   {
     label: 'Daily Worklog',

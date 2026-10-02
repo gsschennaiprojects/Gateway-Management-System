@@ -65,6 +65,19 @@ function getBadgeStyle(val: string): string {
   }
 }
 
+function formatMonthKey(monthKey: string): string {
+  if (!monthKey) return '';
+  const parts = monthKey.split('-');
+  if (parts.length === 2) {
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    if (!isNaN(y) && !isNaN(m) && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    }
+  }
+  return monthKey;
+}
+
 function StudentManagementContent() {
   const { user: currentUser } = useAuth();
   const searchParams = useSearchParams();
@@ -581,7 +594,7 @@ function StudentManagementContent() {
         filename: `GSS_Student_Management_${branchCode}_${new Date().toISOString().substring(0, 10)}`,
         title: activeTab === 'tracker' ? `Mentorship Cohort Performance (ATT_${staffId})` : 'Central Branch Student Directory Dossier',
         subtitle: activeTab === 'tracker' ? `Cohort Attendance & Deliverable Evaluation` : 'Official Branch Roster & Milestone Audit',
-        period: selectedMonth === '2026-10' ? 'October 2026' : 'September 2026',
+        period: formatMonthKey(selectedMonth),
         staffName: currentUser?.name || 'Staff Member',
         staffRole: currentUser?.role?.toUpperCase() || 'STAFF',
         branch: (currentUser?.branch as string) || 'Coimbatore',
@@ -992,10 +1005,16 @@ function StudentManagementContent() {
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
                 {(trackerData?.availableMonths && trackerData.availableMonths.length > 0
                   ? trackerData.availableMonths
-                  : [
-                      { monthKey: '2026-09', title: 'September 2026' },
-                      { monthKey: '2026-10', title: 'October 2026' }
-                    ]
+                  : (() => {
+                      const ld = getLiveDateInfo();
+                      const curKey = `${ld.year}-${String(ld.month).padStart(2, '0')}`;
+                      const prevDate = new Date(ld.year, ld.month - 2, 1);
+                      const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+                      return [
+                        { monthKey: prevKey, title: prevDate.toLocaleString('en-US', { month: 'long', year: 'numeric' }) },
+                        { monthKey: curKey, title: ld.monthName }
+                      ];
+                    })()
                 ).map((m) => {
                   const isSelected = selectedMonth === m.monthKey;
                   return (
@@ -1048,7 +1067,7 @@ function StudentManagementContent() {
               </span>
             </div>
             <span className="text-[11px] font-semibold text-blue-800 shrink-0 self-start sm:self-auto bg-white/90 px-2.5 py-1 rounded-lg border border-blue-200 shadow-xs">
-              Cohort: {selectedMonth === '2026-09' ? 'September 2026' : selectedMonth === '2026-10' ? 'October 2026' : selectedMonth}
+              Cohort: {formatMonthKey(selectedMonth)}
             </span>
           </div>
 
@@ -1067,7 +1086,7 @@ function StudentManagementContent() {
           ) : !trackerData || trackerData.students.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 bg-[var(--bg-card,#FFFFFF)] border border-[var(--border-card,#DADCE0)] rounded-2xl">
               <TableIcon className="w-12 h-12 text-[var(--text-muted,#5F6368)] opacity-30 mb-3" />
-              <p className="text-sm font-semibold text-[var(--text-primary,#1F1F1F)]">No tracker data available for {selectedMonth}</p>
+              <p className="text-sm font-semibold text-[var(--text-primary,#1F1F1F)]">No tracker data available for {formatMonthKey(selectedMonth)}</p>
               <p className="text-xs text-[var(--text-muted,#5F6368)] mt-1">Click &ldquo;+ Rollover Next Month&rdquo; to populate.</p>
             </div>
           ) : (
@@ -1081,7 +1100,7 @@ function StudentManagementContent() {
                         colSpan={2 + currentWorkingDays.length + 5}
                         className="py-3 px-4 text-right font-bold text-sm tracking-wide border-b border-[#2A4A87]"
                       >
-                        {trackerData.monthTitle || `MONTHLY ATTENDANCE & TASK TRACKER — ${selectedMonth === '2026-10' ? 'OCTOBER 2026' : 'SEPTEMBER 2026'}`}
+                        {trackerData.monthTitle || `MONTHLY ATTENDANCE & TASK TRACKER — ${formatMonthKey(selectedMonth).toUpperCase()}`}
                       </th>
                     </tr>
 
@@ -1090,7 +1109,7 @@ function StudentManagementContent() {
                         colSpan={2 + currentWorkingDays.length + 5}
                         className="py-1.5 px-4 text-right italic font-normal text-[11px] border-b border-[#2A4A87]"
                       >
-                        {trackerData.subTitle || 'Cohort: Q3-Q4 2026 | Mon-Fri Tracking | Dropdown Validation'}
+                        {trackerData.subTitle || `Cohort: ${formatMonthKey(selectedMonth)} | Mon-Fri Tracking | Dropdown Validation`}
                       </th>
                     </tr>
 

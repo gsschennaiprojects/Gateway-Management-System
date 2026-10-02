@@ -29,6 +29,8 @@ import { TaskPointInput } from '@/components/worklog/TaskPointInput';
 import { PunchOutConfirmationModal } from '@/components/worklog/PunchOutConfirmationModal';
 import { useDailySession } from '@/lib/worklogs/useDailySession';
 
+import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
+
 interface Student {
   id: string;
   name: string;
@@ -97,8 +99,91 @@ export default function EmployeeDashboardPage() {
     success,
   } = useDailySession();
 
-  // Student Attendance List State
+  // Live Verified Attendance Metrics
+  const [attendanceMetrics, setAttendanceMetrics] = useState<{
+    percentage: number;
+    presentDays: number;
+    absentDays: number;
+    holidayDays: number;
+    workingDaysTotal: number;
+    monthName: string;
+  }>({
+    percentage: 0,
+    presentDays: 0,
+    absentDays: 0,
+    holidayDays: 0,
+    workingDaysTotal: 0,
+    monthName: `${liveDate.monthName} ${liveDate.year}`,
+  });
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let isMounted = true;
+    const loadLiveAttendance = async () => {
+      try {
+        const res = await fetch(`/api/reports/monthly?year=${liveDate.year}&month=${liveDate.month}&targetUserId=${user.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.success && data.report?.metrics) {
+            const m = data.report.metrics;
+            setAttendanceMetrics({
+              percentage: m.attendancePercentage || 0,
+              presentDays: m.presentDays || 0,
+              absentDays: m.absentDays || 0,
+              holidayDays: m.holidayDays || 0,
+              workingDaysTotal: m.workingDays || 0,
+              monthName: `${data.report.monthName} ${data.report.year}`,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Error fetching live attendance metrics:', err);
+      }
+    };
+    void loadLiveAttendance();
+    return () => { isMounted = false; };
+  }, [user?.id, liveDate.year, liveDate.month, liveDate.monthName, loginTime, isPunchedOut]);
+
+  // Student Attendance List State (Loaded from live database)
   const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
+
+  useEffect(() => {
+    if (!user) return;
+    const branchCode = BRANCH_NAME_TO_CODE[user.branch] || 'CBE';
+    let isMounted = true;
+    const loadStudents = async () => {
+      try {
+        // Try user-scoped students first, fall back to branch directory
+        let res = await fetch(`/api/sheets?type=student&staffId=${user.id}&branchCode=${branchCode}`);
+        let data = await res.json().catch(() => ({}));
+        if (!data.success || !Array.isArray(data.data) || data.data.length === 0) {
+          res = await fetch(`/api/sheets?type=branch_student_directory&branchCode=${branchCode}`);
+          data = await res.json().catch(() => ({}));
+        }
+
+        if (isMounted && data.success && Array.isArray(data.data)) {
+          const mapped: Student[] = data.data.slice(0, 10).map((r: any, idx: number) => ({
+            id: r.studentId || r.id || `STU_${idx}`,
+            name: r.studentName || r.name || 'Student',
+            college: r.college || 'Engineering College',
+            domain: r.domain || user.specialization || 'Technical Training',
+            feeStatus: (r.feeStatus?.toLowerCase() === 'paid' ? 'paid' : r.feeStatus?.toLowerCase() === 'partial' ? 'partial' : 'pending'),
+            startDate: r.admissionDate || r.startDate || liveDate.isoDate,
+            endDate: r.endDate || liveDate.isoDate,
+            duration: r.duration || '3 Months',
+            projectCompleted: Boolean(r.projectCompleted),
+            todayStatus: 'present',
+            yesterdayTaskDone: true,
+          }));
+          setStudents(mapped);
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Error fetching live students:', err);
+      }
+    };
+    void loadStudents();
+    return () => { isMounted = false; };
+  }, [user, liveDate.isoDate]);
 
   const toggleStudentStatus = (studentId: string) => {
     setStudents(
@@ -177,12 +262,12 @@ export default function EmployeeDashboardPage() {
       {/* Hero Attendance Gauge Section */}
       <div className="w-full">
         <AttendanceGauge
-          percentage={94.2}
-          presentDays={22}
-          absentDays={1}
-          holidayDays={3}
-          workingDaysTotal={26}
-          monthName={liveDate.monthName}
+          percentage={attendanceMetrics.percentage}
+          presentDays={attendanceMetrics.presentDays}
+          absentDays={attendanceMetrics.absentDays}
+          holidayDays={attendanceMetrics.holidayDays}
+          workingDaysTotal={attendanceMetrics.workingDaysTotal}
+          monthName={attendanceMetrics.monthName}
         />
       </div>
 

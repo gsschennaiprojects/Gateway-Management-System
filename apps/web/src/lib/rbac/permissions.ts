@@ -76,13 +76,17 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view_audit_logs'
   ],
   hr: [
+    'view_employee_dashboard',
+    'mark_own_attendance',
     'view_employee_directory',
+    'edit_employee_attendance',
     'view_employee_attendance_readonly',
     'manage_leads',
     'manage_email_campaigns',
     'view_work_logs', // for Employee, Intern
     'download_individual_reports',
-    'view_reports'
+    'view_reports',
+    'export_reports'
   ],
   employee: [
     'view_employee_dashboard',

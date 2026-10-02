@@ -28,6 +28,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
+import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
 
 export default function UserManagementPage() {
   const { user: currentUser } = useAuth();
@@ -307,7 +308,7 @@ export default function UserManagementPage() {
         filename: `GSS_User_Accounts_${currentUser?.branch || 'Universal'}_${new Date().toISOString().substring(0, 10)}`,
         title: 'User Accounts & Role Permissions Audit Dossier',
         subtitle: 'System User Directory & Authorization Matrix',
-        period: 'September 2026',
+        period: `${getLiveDateInfo().monthName} ${getLiveDateInfo().year}`,
         branch: (currentUser?.branch as string) || 'Universal',
         staffName: currentUser?.name || 'Administrator',
         staffRole: currentUser?.role?.toUpperCase() || 'ADMIN',

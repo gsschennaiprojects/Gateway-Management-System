@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceGauge } from '@/components/ui/AttendanceGauge';
 import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/StatusChip';
@@ -8,6 +8,9 @@ import { useAuth } from '@/context/AuthContext';
 import { User, Branch, BRANCHES } from '@/types/auth';
 import { WorkLogEntry, StaffMonthlySummary } from '@/types/worklog';
 import { formatStudentDate } from '@/types/student';
+import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
+import { getWorkingDaysForMonth } from '@/lib/sheets/sheets-config';
+import { BRANCH_NAME_TO_CODE } from '@/lib/seed-branches';
 import {
   Users,
   Search,
@@ -43,21 +46,27 @@ interface StudentData {
   attendanceRate: number;
 }
 
-const MOCK_BRANCH_STUDENTS: Record<Branch, StudentData[]> = {
-  Coimbatore: [],
-  Chennai: [],
-  Madurai: [],
-  Erode: []
-};
-
 export default function EmployeeDirectoryPage() {
   const { user: currentUser } = useAuth();
+  const liveDate = useMemo(() => getLiveDateInfo(), []);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<User | null>(null);
   const [modalTab, setModalTab] = useState<'overview' | 'worklogs' | 'report'>('overview');
   const [workLogs, setWorkLogs] = useState<WorkLogEntry[]>([]);
   const [summary, setSummary] = useState<StaffMonthlySummary | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+
+  // Live Attendance Matrices per employee (keyed by employee ID)
+  const [attendanceRecords, setAttendanceRecords] = useState<Record<string, {
+    percentage: number;
+    presentDays: number;
+    absentDays: number;
+    holidayDays: number;
+    workingDaysTotal: number;
+  }>>({});
+
+  // Live students list
+  const [branchStudents, setBranchStudents] = useState<StudentData[]>([]);
 
   const [search, setSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState<string>('all');
@@ -79,14 +88,103 @@ export default function EmployeeDirectoryPage() {
       .catch(console.error);
   }, [isSuperAdmin, branchFilter, currentUser]);
 
+  // Load live attendance stats for each staff member
+  useEffect(() => {
+    if (!currentUser) return;
+    const loadDirectoryAttendance = async () => {
+      try {
+        const branchParam = isSuperAdmin ? (branchFilter === 'all' ? 'All' : branchFilter) : currentUser.branch;
+        const res = await fetch(`/api/admin/attendance?year=${liveDate.year}&month=${liveDate.month}&branch=${encodeURIComponent(branchParam)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.records)) {
+            const daysInMonth = new Date(liveDate.year, liveDate.month, 0).getDate();
+            let workingDaysTotal = 0;
+            let elapsedWorkingDays = 0;
+            for (let d = 1; d <= daysInMonth; d++) {
+              if (new Date(liveDate.year, liveDate.month - 1, d).getDay() !== 0) {
+                workingDaysTotal++;
+                if (d <= liveDate.day) elapsedWorkingDays++;
+              }
+            }
+            const baseDays = elapsedWorkingDays > 0 ? elapsedWorkingDays : workingDaysTotal;
+
+            const map: Record<string, {
+              percentage: number;
+              presentDays: number;
+              absentDays: number;
+              holidayDays: number;
+              workingDaysTotal: number;
+            }> = {};
+
+            for (const r of data.records) {
+              let p = 0;
+              let a = 0;
+              let h = 0;
+              if (r.attendance && typeof r.attendance === 'object') {
+                for (const st of Object.values(r.attendance)) {
+                  if (st === 'present' || st === 'late') p++;
+                  else if (st === 'half_day') p += 0.5;
+                  else if (st === 'absent') a++;
+                  else if (st === 'holiday') h++;
+                }
+              }
+              const percentage = baseDays > 0 ? Math.min(100, Math.round((p / baseDays) * 1000) / 10) : 0;
+              map[r.id] = {
+                percentage,
+                presentDays: p,
+                absentDays: a,
+                holidayDays: h,
+                workingDaysTotal,
+              };
+            }
+            setAttendanceRecords(map);
+          }
+        }
+      } catch (err) {
+        console.warn('[Directory] Failed to load live attendance stats:', err);
+      }
+    };
+    void loadDirectoryAttendance();
+  }, [currentUser, isSuperAdmin, branchFilter, liveDate.year, liveDate.month, liveDate.day]);
+
+  // Load real students from database
+  useEffect(() => {
+    if (!currentUser) return;
+    const loadStudents = async () => {
+      try {
+        const branchCode = BRANCH_NAME_TO_CODE[currentUser.branch] || 'CBE';
+        const res = await fetch(`/api/sheets?type=branch_student_directory&branchCode=${branchCode}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.data)) {
+            const mapped: StudentData[] = data.data.map((r: any, idx: number) => ({
+              id: r.studentId || r.id || `STU_${idx}`,
+              name: r.studentName || r.name || 'Student',
+              college: r.college || 'Engineering College',
+              domain: r.domain || 'Software Engineering',
+              branch: (r.branch || currentUser.branch) as Branch,
+              feeStatus: (r.feeStatus?.toLowerCase() === 'paid' ? 'paid' : r.feeStatus?.toLowerCase() === 'partial' ? 'partial' : 'pending'),
+              startDate: r.admissionDate || r.startDate || liveDate.isoDate,
+              endDate: r.endDate || liveDate.isoDate,
+              duration: r.duration || '3 Months',
+              attendanceRate: 90,
+            }));
+            setBranchStudents(mapped);
+          }
+        }
+      } catch (err) {
+        console.warn('[Directory] Failed to load live students:', err);
+      }
+    };
+    void loadStudents();
+  }, [currentUser, liveDate.isoDate]);
+
   const visibleStaff = users.filter((u) => {
     if (u.status !== 'active') return false;
     if (isSuperAdmin) return true;
-    if (isAdmin) {
+    if (isAdmin || isHR) {
       return u.branch === currentUser?.branch && ['employee', 'intern'].includes(u.role);
-    }
-    if (isHR) {
-      return ['employee', 'intern'].includes(u.role);
     }
     return false;
   });
@@ -122,8 +220,7 @@ export default function EmployeeDirectoryPage() {
   };
 
   const getStudentsForEmployee = (emp: User): StudentData[] => {
-    const branchList = MOCK_BRANCH_STUDENTS[emp.branch] || [];
-    return branchList.filter(
+    return branchStudents.filter(
       (s) => !emp.specialization || s.domain.toLowerCase().includes(emp.specialization.toLowerCase()) || s.branch === emp.branch
     );
   };
@@ -134,7 +231,7 @@ export default function EmployeeDirectoryPage() {
     setDownloadingFormat('roster');
     try {
       exportToExcel({
-        filename: `GSS_Staff_Roster_${currentUser?.branch || 'All_Branches'}_Sep_2026`,
+        filename: `GSS_Staff_Roster_${currentUser?.branch || 'All_Branches'}_${liveDate.shortMonth}_${liveDate.year}`,
         sheetName: 'Staff Directory',
         title: 'Staff Directory & Employee Roster',
         subtitle: `Branch: ${currentUser?.branch || 'All Branches'} • Total Members: ${filtered.length}`,
@@ -164,10 +261,10 @@ export default function EmployeeDirectoryPage() {
     setDownloadingFormat('roster_docx');
     try {
       await exportToDocx({
-        filename: `GSS_Staff_Roster_${currentUser?.branch || 'All_Branches'}_Sep_2026`,
+        filename: `GSS_Staff_Roster_${currentUser?.branch || 'All_Branches'}_${liveDate.shortMonth}_${liveDate.year}`,
         title: 'Staff Directory & Personnel Roster Dossier',
         subtitle: 'Official Branch Staff Inventory & Specialization Allocation',
-        period: 'September 2026',
+        period: `${liveDate.monthName} ${liveDate.year}`,
         branch: (currentUser?.branch as string) || 'All Branches',
         staffName: currentUser?.name || 'Administrator',
         staffRole: currentUser?.role?.toUpperCase() || 'ADMIN',
@@ -199,10 +296,16 @@ export default function EmployeeDirectoryPage() {
     if (!selectedEmployee) return;
     setDownloadingFormat('excel');
     try {
+      const daysInMonth = new Date(liveDate.year, liveDate.month, 0).getDate();
+      const attStats = attendanceRecords[selectedEmployee.id];
+      const attRate = summary?.attendanceRate ?? (attStats?.percentage || 0);
+      const presDays = summary?.presentDays ?? (attStats?.presentDays || 0);
+      const workDays = summary?.totalWorkingDays ?? (attStats?.workingDaysTotal || 26);
+
       exportToExcel({
-        filename: `GSS_Performance_Audit_${selectedEmployee.name.replace(/\s+/g, '_')}_Sep_2026`,
+        filename: `GSS_Performance_Audit_${selectedEmployee.name.replace(/\s+/g, '_')}_${liveDate.shortMonth}_${liveDate.year}`,
         sheetName: 'Audit Report',
-        title: `September 2026 Performance Audit — ${selectedEmployee.name}`,
+        title: `${liveDate.monthName} ${liveDate.year} Performance Audit — ${selectedEmployee.name}`,
         subtitle: `Role: ${selectedEmployee.role.toUpperCase()} • Branch: ${selectedEmployee.branch}`,
         metadata: {
           'Employee Name': selectedEmployee.name,
@@ -210,21 +313,21 @@ export default function EmployeeDirectoryPage() {
           'Branch': selectedEmployee.branch,
           'Role': selectedEmployee.role.toUpperCase(),
           'Specialization': selectedEmployee.specialization || 'Software Engineering',
-          'Attendance Rate': `${summary?.attendanceRate || 95.8}%`,
-          'Task Completion Rate': `${summary?.completionRate || 93}%`,
+          'Attendance Rate': `${attRate}%`,
+          'Task Completion Rate': `${summary?.completionRate ?? 0}%`,
         },
         headers: ['Metric / Worklog Date', 'Detail / Task', 'Status / Time'],
         rows: [
-          ['Attendance Rate', `${summary?.attendanceRate || 95.8}%`, `${summary?.presentDays || 23} of 26 days present`],
-          ['Tasks Completed', summary?.totalCompletedTasks || 13, `of ${summary?.totalPlannedTasks || 14} planned`],
-          ['Task Completion Rate', `${summary?.completionRate || 93}%`, 'Above corporate target'],
-          ['Assigned Cohort Trainees', summary?.assignedStudentsCount || 4, 'Active Supervised Students'],
+          ['Attendance Rate', `${attRate}%`, `${presDays} of ${workDays} days present`],
+          ['Tasks Completed', summary?.totalCompletedTasks ?? 0, `of ${summary?.totalPlannedTasks ?? 0} planned`],
+          ['Task Completion Rate', `${summary?.completionRate ?? 0}%`, (summary?.completionRate ?? 0) >= 80 ? 'Above corporate target' : 'Standard velocity'],
+          ['Assigned Cohort Trainees', summary?.assignedStudentsCount ?? branchStudents.filter(s => s.branch === selectedEmployee.branch).length, 'Active Supervised Students'],
           ...workLogs.map((log) => [
             log.date,
             Array.isArray(log.completedTasks) && log.completedTasks.length > 0
               ? log.completedTasks.join('; ')
               : 'Daily operational activities completed',
-            `${log.loginTime || '09:00 AM'} – ${log.logoutTime || '06:00 PM'} (${log.hoursLogged ? `${log.hoursLogged} hrs` : '8.5 hrs'})`,
+            `${log.loginTime || '—'} – ${log.logoutTime || '—'} (${log.hoursLogged ? `${log.hoursLogged} hrs` : '—'})`,
           ]),
         ],
       });
@@ -237,11 +340,18 @@ export default function EmployeeDirectoryPage() {
     if (!selectedEmployee) return;
     setDownloadingFormat('docx');
     try {
+      const daysInMonth = new Date(liveDate.year, liveDate.month, 0).getDate();
+      const liveWorkingDaysTotal = getWorkingDaysForMonth(liveDate.year, liveDate.month).length;
+      const attStats = attendanceRecords[selectedEmployee.id];
+      const attRate = summary?.attendanceRate ?? (attStats?.percentage || 0);
+      const presDays = summary?.presentDays ?? (attStats?.presentDays || 0);
+      const workDays = summary?.totalWorkingDays ?? (attStats?.workingDaysTotal || liveWorkingDaysTotal);
+
       await exportToDocx({
-        filename: `GSS_Performance_Audit_${selectedEmployee.name.replace(/\s+/g, '_')}_Sep_2026`,
+        filename: `GSS_Performance_Audit_${selectedEmployee.name.replace(/\s+/g, '_')}_${liveDate.shortMonth}_${liveDate.year}`,
         title: `Monthly Performance & Attendance Audit — ${selectedEmployee.name}`,
         subtitle: `Official Monthly Performance Evaluation & Cohort Supervision Record`,
-        period: 'September 1 – September 30, 2026',
+        period: `${liveDate.monthName} 1 – ${liveDate.monthName} ${daysInMonth}, ${liveDate.year}`,
         staffName: selectedEmployee.name,
         staffRole: selectedEmployee.role.toUpperCase(),
         branch: selectedEmployee.branch,
@@ -252,10 +362,10 @@ export default function EmployeeDirectoryPage() {
             table: {
               headers: ['Performance Metric', 'Recorded Performance', 'Benchmark', 'Compliance Evaluation'],
               rows: [
-                ['Attendance Rate', `${summary?.attendanceRate || 95.8}%`, '90.0%', 'Exceeds Benchmark'],
-                ['Present Working Days', `${summary?.presentDays || 23} Days`, '22 Days', 'Verified Full Present'],
-                ['Task Deliverables Completed', `${summary?.totalCompletedTasks || 13} Tasks`, '12 Tasks', '100% Target Met'],
-                ['Task Velocity Rate', `${summary?.completionRate || 93}%`, '85.0%', 'Satisfactory Execution'],
+                ['Attendance Rate', `${attRate}%`, '90.0%', attRate >= 90 ? 'Exceeds Benchmark' : 'Standard'],
+                ['Present Working Days', `${presDays} Days`, `${workDays} Days`, presDays > 0 ? 'Verified Present' : 'Pending Verification'],
+                ['Task Deliverables Completed', `${summary?.totalCompletedTasks ?? 0} Tasks`, `${summary?.totalPlannedTasks ?? 0} Tasks`, (summary?.totalCompletedTasks ?? 0) >= (summary?.totalPlannedTasks ?? 0) && (summary?.totalPlannedTasks ?? 0) > 0 ? '100% Target Met' : 'In Progress'],
+                ['Task Velocity Rate', `${summary?.completionRate ?? 0}%`, '85.0%', (summary?.completionRate ?? 0) >= 85 ? 'Satisfactory Execution' : 'In Progress'],
               ],
               columnWidthsPercentage: [35, 25, 20, 20],
             },
@@ -280,15 +390,14 @@ export default function EmployeeDirectoryPage() {
             description: 'Chronological activity logs and verified hours.',
             table: {
               headers: ['Date', 'Login / Logout', 'Hours', 'Key Tasks Accomplished'],
-              rows: (workLogs.length > 0 ? workLogs.slice(0, 8) : [
-                { date: '2026-09-22', loginTime: '09:00 AM', logoutTime: '06:00 PM', hoursLogged: 9.0, completedTasks: ['Completed trainee code reviews & milestone sign-offs'] },
-                { date: '2026-09-21', loginTime: '09:05 AM', logoutTime: '06:15 PM', hoursLogged: 9.1, completedTasks: ['Database optimization and attendance API validation'] },
-              ]).map((l) => [
+              rows: workLogs.length > 0 ? workLogs.slice(0, 8).map((l) => [
                 l.date,
-                `${l.loginTime || '09:00 AM'} – ${l.logoutTime || '06:00 PM'}`,
-                l.hoursLogged ? `${l.hoursLogged} hrs` : '8.5 hrs',
+                `${l.loginTime || '—'} – ${l.logoutTime || '—'}`,
+                l.hoursLogged ? `${l.hoursLogged} hrs` : '—',
                 Array.isArray(l.completedTasks) && l.completedTasks.length > 0 ? l.completedTasks.join('; ') : 'Operations tasks completed',
-              ]),
+              ]) : [
+                ['—', 'No logs recorded', '—', 'No daily logs available for this period']
+              ],
               columnWidthsPercentage: [15, 25, 15, 45],
             },
           },
@@ -476,14 +585,25 @@ export default function EmployeeDirectoryPage() {
                   </td>
 
                   <td className="py-3.5 px-4">
-                    <AttendanceGauge
-                      percentage={94.5}
-                      presentDays={22}
-                      absentDays={1}
-                      holidayDays={3}
-                      workingDaysTotal={26}
-                      size="compact"
-                    />
+                    {(() => {
+                      const stats = attendanceRecords[emp.id] || {
+                        percentage: 0,
+                        presentDays: 0,
+                        absentDays: 0,
+                        holidayDays: 0,
+                        workingDaysTotal: 26,
+                      };
+                      return (
+                        <AttendanceGauge
+                          percentage={stats.percentage}
+                          presentDays={stats.presentDays}
+                          absentDays={stats.absentDays}
+                          holidayDays={stats.holidayDays}
+                          workingDaysTotal={stats.workingDaysTotal}
+                          size="compact"
+                        />
+                      );
+                    })()}
                   </td>
 
                   <td className="py-3.5 px-4 text-right">
@@ -700,12 +820,12 @@ export default function EmployeeDirectoryPage() {
 
                 {/* Attendance Record Gauge */}
                 <AttendanceGauge
-                  percentage={95.8}
-                  presentDays={23}
-                  absentDays={1}
-                  holidayDays={2}
-                  workingDaysTotal={26}
-                  monthName="September 2026 Record"
+                  percentage={summary?.attendanceRate ?? (attendanceRecords[selectedEmployee.id]?.percentage || 0)}
+                  presentDays={summary?.presentDays ?? (attendanceRecords[selectedEmployee.id]?.presentDays || 0)}
+                  absentDays={summary?.absentDays ?? (attendanceRecords[selectedEmployee.id]?.absentDays || 0)}
+                  holidayDays={summary?.holidayDays ?? (attendanceRecords[selectedEmployee.id]?.holidayDays || 0)}
+                  workingDaysTotal={summary?.totalWorkingDays ?? (attendanceRecords[selectedEmployee.id]?.workingDaysTotal || 26)}
+                  monthName={`${liveDate.monthName} ${liveDate.year} Record`}
                 />
               </div>
             )}
@@ -723,7 +843,7 @@ export default function EmployeeDirectoryPage() {
                     </p>
                   </div>
                   <span className="text-xs font-medium text-[var(--brand-on-container,#1A73E8)] px-3 py-1 rounded-full bg-[var(--brand-container,#E8F0FE)] border border-[var(--border-subtle,#D2E3FC)]">
-                    September 2026 Cycle
+                    {liveDate.monthName} {liveDate.year} Cycle
                   </span>
                 </div>
 
@@ -826,7 +946,7 @@ export default function EmployeeDirectoryPage() {
                       Individualized Monthly Performance Document
                     </span>
                     <h3 className="text-lg font-semibold text-[var(--text-primary,#1F1F1F)] mt-0.5">
-                      September 2026 Audit Report — {selectedEmployee.name}
+                      {liveDate.monthName} {liveDate.year} Audit Report — {selectedEmployee.name}
                     </h3>
                   </div>
 
@@ -877,31 +997,31 @@ export default function EmployeeDirectoryPage() {
                   <div className="p-3.5 rounded-2xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)]">
                     <span className="text-[10px] text-[var(--text-secondary,#5F6368)] uppercase font-medium">Attendance Rate</span>
                     <p className="text-xl font-semibold text-[var(--badge-success-text,#137333)] mt-1">
-                      {summary?.attendanceRate || 95.8}%
+                      {summary?.attendanceRate ?? (attendanceRecords[selectedEmployee.id]?.percentage || 0)}%
                     </p>
-                    <span className="text-[10px] text-[var(--text-muted,#747775)]">{summary?.presentDays || 23} of 26 days</span>
+                    <span className="text-[10px] text-[var(--text-muted,#747775)]">{summary?.presentDays ?? (attendanceRecords[selectedEmployee.id]?.presentDays || 0)} of {summary?.totalWorkingDays ?? (attendanceRecords[selectedEmployee.id]?.workingDaysTotal || 26)} days</span>
                   </div>
 
                   <div className="p-3.5 rounded-2xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)]">
                     <span className="text-[10px] text-[var(--text-secondary,#5F6368)] uppercase font-medium">Tasks Completed</span>
                     <p className="text-xl font-semibold text-[var(--text-primary,#1F1F1F)] mt-1">
-                      {summary?.totalCompletedTasks || 13}
+                      {summary?.totalCompletedTasks ?? 0}
                     </p>
-                    <span className="text-[10px] text-[var(--brand-primary,#1A73E8)]">of {summary?.totalPlannedTasks || 14} planned</span>
+                    <span className="text-[10px] text-[var(--brand-primary,#1A73E8)]">of {summary?.totalPlannedTasks ?? 0} planned</span>
                   </div>
 
                   <div className="p-3.5 rounded-2xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)]">
                     <span className="text-[10px] text-[var(--text-secondary,#5F6368)] uppercase font-medium">Completion Rate</span>
                     <p className="text-xl font-semibold text-[var(--badge-success-text,#137333)] mt-1">
-                      {summary?.completionRate || 93}%
+                      {summary?.completionRate ?? 0}%
                     </p>
-                    <span className="text-[10px] text-[var(--badge-success-text,#137333)]">Above target</span>
+                    <span className="text-[10px] text-[var(--badge-success-text,#137333)]">{(summary?.completionRate ?? 0) >= 80 ? 'Above target' : 'Standard'}</span>
                   </div>
 
                   <div className="p-3.5 rounded-2xl bg-[var(--bg-card-subtle,#F8FAFD)] border border-[var(--border-card,#DADCE0)]">
                     <span className="text-[10px] text-[var(--text-secondary,#5F6368)] uppercase font-medium">Cohort Students</span>
                     <p className="text-xl font-semibold text-[var(--text-primary,#1F1F1F)] mt-1">
-                      {summary?.assignedStudentsCount || 4}
+                      {summary?.assignedStudentsCount ?? branchStudents.filter(s => s.branch === selectedEmployee.branch).length}
                     </p>
                     <span className="text-[10px] text-[var(--text-muted,#747775)]">{selectedEmployee.branch} Branch</span>
                   </div>
@@ -920,7 +1040,7 @@ export default function EmployeeDirectoryPage() {
                     <div>Domain: <strong className="text-[var(--text-primary,#1F1F1F)] block mt-0.5">{selectedEmployee.specialization || 'General'}</strong></div>
                   </div>
                   <p className="text-xs leading-relaxed pt-3 border-t border-[var(--border-card,#DADCE0)] text-[var(--text-secondary,#5F6368)]">
-                    This official audit report certifies that {selectedEmployee.name} completed daily login and logout duties with an overall attendance score of {summary?.attendanceRate || 95.8}%. All planned modules and deliverables for the September 2026 cycle have been logged and verified.
+                    This official audit report certifies that {selectedEmployee.name} completed daily login and logout duties with an overall attendance score of {summary?.attendanceRate ?? (attendanceRecords[selectedEmployee.id]?.percentage || 0)}%. All planned modules and deliverables for the {liveDate.monthName} {liveDate.year} cycle have been logged and verified.
                   </p>
                 </div>
               </div>

@@ -25,6 +25,7 @@ import {
   Printer,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
+import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
 
 export default function TasksManagementPage() {
   const { user: currentUser } = useAuth();
@@ -45,7 +46,7 @@ export default function TasksManagementPage() {
   const [groupBranch, setGroupBranch] = useState<string>(currentUser?.branch || 'Coimbatore');
   const groupDomain = '';
   const [priority, setPriority] = useState<TaskPriority>('medium');
-  const [dueDate, setDueDate] = useState('2026-09-18');
+  const [dueDate, setDueDate] = useState(() => getLiveDateInfo().isoDate);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [downloadingFormat, setDownloadingFormat] = useState<'excel' | 'docx' | null>(null);
@@ -83,7 +84,7 @@ export default function TasksManagementPage() {
         filename: `GSS_Tasks_Delegations_${new Date().toISOString().substring(0, 10)}`,
         title: 'Tasks & Delegations Audit Report',
         subtitle: 'Official Task Assignment & Velocity Tracking Record',
-        period: 'September 2026',
+        period: `${getLiveDateInfo().monthName} ${getLiveDateInfo().year}`,
         branch: currentUser?.branch || 'Coimbatore',
         staffName: currentUser?.name || 'Administrator',
         staffRole: currentUser?.role?.toUpperCase() || 'ADMIN',

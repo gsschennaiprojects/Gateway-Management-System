@@ -10,7 +10,7 @@ import {
 } from '@/lib/worklogs/worklog-session-utils';
 import { canViewUserWorkLogs } from '@/lib/rbac/permissions';
 import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
-import type { StaffAttendanceStatus, WorkLogEntry } from '@/types/worklog';
+import type { StaffAttendanceStatus, WorkLogEntry, StaffMonthlySummary } from '@/types/worklog';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,9 +64,75 @@ export async function GET(request: NextRequest) {
     const isSpanningDays = !!(todayLog && todayLog.date && todayLog.date < liveInfo.isoDate && !todayLog.logoutTime);
     const daysElapsed = isSpanningDays ? differenceInCalendarDays(todayLog!.date, liveInfo.isoDate) + 1 : 1;
 
+    // 3. Compute Live Monthly Summary
+    const daysInMonth = new Date(liveInfo.year, liveInfo.month, 0).getDate();
+    let totalWorkingDays = 0;
+    let elapsedWorkingDays = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dt = new Date(liveInfo.year, liveInfo.month - 1, d);
+      if (dt.getDay() !== 0) {
+        totalWorkingDays++;
+        if (d <= liveInfo.day) elapsedWorkingDays++;
+      }
+    }
+
+    const monthPrefix = `${liveInfo.year}-${String(liveInfo.month).padStart(2, '0')}`;
+    const monthlyLogs = logs.filter(l => l.date && l.date.startsWith(monthPrefix));
+    const totalPlanned = monthlyLogs.reduce((sum, l) => sum + (Array.isArray(l.plannedTasks) ? l.plannedTasks.length : 0), 0);
+    const totalCompleted = monthlyLogs.reduce((sum, l) => sum + (Array.isArray(l.completedTasks) ? l.completedTasks.length : 0), 0);
+
+    let presentDays = monthlyLogs.filter(l => l.attendanceStatus === 'present' || l.attendanceStatus === 'late').length;
+    let absentDays = monthlyLogs.filter(l => l.attendanceStatus === 'absent').length;
+    let holidayDays = monthlyLogs.filter(l => l.attendanceStatus === 'holiday').length;
+
+    const db = getAdminFirestore();
+    if (db) {
+      try {
+        const attDoc = await db.collection('staff_attendance').doc(`att_${targetUserId}_${liveInfo.year}_${liveInfo.month}`).get();
+        if (attDoc && attDoc.exists) {
+          const attMap = (attDoc.data()?.attendance || {}) as Record<string, string>;
+          let pCount = 0;
+          let aCount = 0;
+          let hCount = 0;
+          for (const st of Object.values(attMap)) {
+            if (st === 'present' || st === 'late') pCount++;
+            else if (st === 'half_day') pCount += 0.5;
+            else if (st === 'absent') aCount++;
+            else if (st === 'holiday') hCount++;
+          }
+          if (pCount > 0) presentDays = pCount;
+          if (aCount > 0) absentDays = aCount;
+          if (hCount > 0) holidayDays = hCount;
+        }
+      } catch {
+        // Fallback to worklog count
+      }
+    }
+
+    const baseDays = elapsedWorkingDays > 0 ? elapsedWorkingDays : totalWorkingDays;
+    const attendanceRate = baseDays > 0 ? Math.min(100, Math.round((presentDays / baseDays) * 1000) / 10) : 0;
+    const completionRate = totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0;
+
+    const summary: StaffMonthlySummary = {
+      userId: targetUserId,
+      userName: target.name,
+      userRole: target.role,
+      branch: target.branch,
+      month: `${liveInfo.monthName} ${liveInfo.year}`,
+      totalWorkingDays,
+      presentDays,
+      absentDays,
+      holidayDays,
+      attendanceRate,
+      totalPlannedTasks: totalPlanned,
+      totalCompletedTasks: totalCompleted,
+      completionRate,
+      assignedStudentsCount: 0,
+    };
+
     return NextResponse.json({
       logs: isTodayRequested && todayLog ? [todayLog] : logs,
-      summary: null,
+      summary,
       todayLog: todayLog ? {
         ...todayLog,
         isSpanningDays,

@@ -57,19 +57,29 @@ export function getWorkLogsForUser(actor: User, targetUserId: string): WorkLogEn
 
 export function getStaffMonthlySummary(targetUserId: string): StaffMonthlySummary {
   const user = findUserById(targetUserId) || getAllUsers().find((u) => u.id === targetUserId);
-  const userLogs = serverWorkLogs.filter((l) => l.userId === targetUserId);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  let workingDays = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (new Date(year, month - 1, d).getDay() !== 0) workingDays++;
+  }
+  const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-  const totalPlanned = userLogs.reduce((sum, l) => sum + l.plannedTasks.length, 0);
-  const totalCompleted = userLogs.reduce((sum, l) => sum + l.completedTasks.length, 0);
-  const presentDays = userLogs.filter((l) => l.attendanceStatus === 'present').length;
-  const workingDays = 26; // Working days in Sep 2026
+  const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+  const userLogs = serverWorkLogs.filter((l) => l.userId === targetUserId && (!l.date || l.date.startsWith(monthPrefix)));
+
+  const totalPlanned = userLogs.reduce((sum, l) => sum + (l.plannedTasks ? l.plannedTasks.length : 0), 0);
+  const totalCompleted = userLogs.reduce((sum, l) => sum + (l.completedTasks ? l.completedTasks.length : 0), 0);
+  const presentDays = userLogs.filter((l) => l.attendanceStatus === 'present' || l.attendanceStatus === 'late').length;
 
   return {
     userId: targetUserId,
     userName: user?.name || 'Staff Member',
     userRole: user?.role || 'employee',
     branch: user?.branch || 'Coimbatore',
-    month: 'September 2026',
+    month: monthName,
     totalWorkingDays: workingDays,
     presentDays,
     absentDays: 0,

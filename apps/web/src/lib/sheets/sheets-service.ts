@@ -39,6 +39,7 @@ import {
   type StudentTrackerItem,
   type AttendanceTrackerData,
 } from './sheets-config';
+import { getLiveDateInfo } from '../worklogs/worklog-session-utils';
 
 // ─── Service Account Setup ─────────────────────────────────────────────────────
 
@@ -1182,10 +1183,12 @@ export async function getAttendanceTracker(
     if (match) selectedBlock = match;
   }
   if (!selectedBlock) {
+    const liveDate = getLiveDateInfo();
+    const liveKey = `${liveDate.year}-${String(liveDate.month).padStart(2, '0')}`;
     selectedBlock = {
       startRow: 0,
-      monthKey: '2026-09',
-      monthTitle: 'September 2026',
+      monthKey: liveKey,
+      monthTitle: liveDate.monthName,
       subTitle: 'Cohort Tracking'
     };
   }
@@ -1267,8 +1270,10 @@ export async function getAttendanceTracker(
   }
 
   const availableMonths = blocks.map(b => ({ monthKey: b.monthKey, title: b.monthTitle }));
-  if (!availableMonths.some(m => m.monthKey === '2026-10')) {
-    availableMonths.push({ monthKey: '2026-10', title: 'October 2026' });
+  const liveDate = getLiveDateInfo();
+  const liveMonthKey = `${liveDate.year}-${String(liveDate.month).padStart(2, '0')}`;
+  if (!availableMonths.some(m => m.monthKey === liveMonthKey)) {
+    availableMonths.push({ monthKey: liveMonthKey, title: liveDate.monthName });
   }
 
   return {
