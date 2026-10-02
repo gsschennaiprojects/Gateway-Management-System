@@ -58,6 +58,73 @@ export interface MonthlyStateDoc {
   totalEmployeesArchived: number;
   branchesUpdated: string[];
   status: string;
+  isRolloverRunning?: boolean;
+  rolloverLockUntil?: string | null;
+  rolloverStartedAt?: string | null;
+}
+
+/**
+ * Scalable Firestore Batch Manager
+ * Overcomes Firestore's 500-write limit per batch by buffering operations
+ * and automatically committing in chunks of 350 writes max.
+ */
+export class ChunkedBatchWriter {
+  private currentBatch: FirebaseFirestore.WriteBatch | null = null;
+  private currentCount = 0;
+  private totalCommitted = 0;
+  private readonly maxChunkSize = 350; // Well below 500 limit for absolute safety
+  private commitPromises: Promise<void>[] = [];
+
+  constructor(private db: FirebaseFirestore.Firestore | null) {
+    if (this.db && typeof this.db.batch === 'function') {
+      this.currentBatch = this.db.batch();
+    }
+  }
+
+  set(
+    ref: FirebaseFirestore.DocumentReference,
+    data: FirebaseFirestore.WithFieldValue<FirebaseFirestore.DocumentData>,
+    options?: FirebaseFirestore.SetOptions
+  ) {
+    if (!this.db || !this.currentBatch) return;
+
+    if (options) {
+      this.currentBatch.set(ref, data, options);
+    } else {
+      this.currentBatch.set(ref, data);
+    }
+    this.currentCount++;
+
+    if (this.currentCount >= this.maxChunkSize) {
+      const batchToCommit = this.currentBatch;
+      this.commitPromises.push(
+        batchToCommit.commit().then(() => {
+          this.totalCommitted += this.maxChunkSize;
+        })
+      );
+      this.currentBatch = this.db.batch();
+      this.currentCount = 0;
+    }
+  }
+
+  async commit(): Promise<number> {
+    if (!this.db || !this.currentBatch) return 0;
+
+    if (this.currentCount > 0) {
+      const remainingBatch = this.currentBatch;
+      const count = this.currentCount;
+      this.commitPromises.push(
+        remainingBatch.commit().then(() => {
+          this.totalCommitted += count;
+        })
+      );
+      this.currentBatch = null;
+      this.currentCount = 0;
+    }
+
+    await Promise.all(this.commitPromises);
+    return this.totalCommitted;
+  }
 }
 
 // In-memory fallback cache for development or when Firestore is unconfigured
@@ -252,7 +319,7 @@ export async function executeMonthRolloverAndArchive(options?: {
   let archivedWorklogCount = 0;
   let initializedStaffCount = 0;
 
-  const batch = db ? db.batch() : null;
+  const writer = new ChunkedBatchWriter(db);
 
   // 4. Archive complete previous month data for each employee
   for (const user of activeUsers) {
@@ -374,10 +441,14 @@ export async function executeMonthRolloverAndArchive(options?: {
       status: 'FINALIZED',
     };
 
-    // Save attendance archive
-    if (db && batch) {
+    // Save attendance archive into primary monthly_attendance_archives collection
+    if (db) {
       const attRef = db.collection('monthly_attendance_archives').doc(attArchiveId);
-      batch.set(attRef, attArchiveDoc, { merge: true });
+      writer.set(attRef, attArchiveDoc, { merge: true });
+
+      // Dual-write to staff_attendance_history for fast per-staff lifetime timeline queries
+      const histRef = db.collection('staff_attendance_history').doc(`hist_${staffId}_${prevYear}_${prevMonthStr}`);
+      writer.set(histRef, attArchiveDoc, { merge: true });
     }
     memoryMonthlyArchives.attendance.set(attArchiveId, attArchiveDoc);
     archivedAttendanceCount++;
@@ -441,18 +512,18 @@ export async function executeMonthRolloverAndArchive(options?: {
     };
 
     // Save worklog archive
-    if (db && batch) {
+    if (db) {
       const wlRef = db.collection('monthly_worklog_archives').doc(wlArchiveId);
-      batch.set(wlRef, wlArchiveDoc, { merge: true });
+      writer.set(wlRef, wlArchiveDoc, { merge: true });
     }
     memoryMonthlyArchives.worklogs.set(wlArchiveId, wlArchiveDoc);
     archivedWorklogCount++;
 
     // 5. Initialize fresh attendance document for current month in staff_attendance
     const newMonthDocId = `att_${staffId}_${newYear}_${newMonth}`;
-    if (db && batch) {
+    if (db) {
       const newMonthRef = db.collection('staff_attendance').doc(newMonthDocId);
-      batch.set(newMonthRef, {
+      writer.set(newMonthRef, {
         id: newMonthDocId,
         staffId,
         name: user.name,
@@ -482,9 +553,9 @@ export async function executeMonthRolloverAndArchive(options?: {
     const branchStaff = activeUsers.filter(u => u.branch?.toLowerCase() === bName.toLowerCase());
     const metricsDocId = `metrics_${bCode}_${newYear}_${newMonth}`;
 
-    if (db && batch) {
+    if (db) {
       const metricRef = db.collection('branch_metrics').doc(metricsDocId);
-      batch.set(metricRef, {
+      writer.set(metricRef, {
         branchId: bCode,
         branchCode: bCode,
         branch: bName,
@@ -513,12 +584,15 @@ export async function executeMonthRolloverAndArchive(options?: {
     totalEmployeesArchived: activeUsers.length,
     branchesUpdated: branches,
     status: 'ACTIVE_AND_ARCHIVED',
+    isRolloverRunning: false,
+    rolloverLockUntil: null,
+    rolloverStartedAt: null,
   };
 
-  if (db && batch) {
+  if (db) {
     const stateRef = db.collection('systemConfig').doc('monthly_state');
-    batch.set(stateRef, systemStateData, { merge: true });
-    await batch.commit();
+    writer.set(stateRef, systemStateData, { merge: true });
+    await writer.commit();
   }
 
   memoryMonthlyArchives.state = systemStateData;
@@ -568,60 +642,114 @@ export async function executeMonthRolloverAndArchive(options?: {
  * Checks whether the current calendar month has rolled over and automatically
  * triggers the archive of the previous month if not yet performed.
  */
-let lastCheckTime = 0;
-export async function checkAndAutoExecuteMonthRollover(): Promise<{ triggered: boolean; message?: string }> {
-  // Throttle check to at most once per 60 seconds
-  const nowMs = Date.now();
-  if (nowMs - lastCheckTime < 60_000) {
-    return { triggered: false };
-  }
-  lastCheckTime = nowMs;
-
+/**
+ * Checks whether the current calendar month has rolled over and automatically
+ * triggers the archive of the previous month if not yet performed.
+ * Employs a distributed transaction lock to prevent race conditions across serverless instances.
+ */
+export async function checkAndAutoExecuteMonthRollover(options?: {
+  force?: boolean;
+  actorId?: string;
+  actorName?: string;
+}): Promise<{ triggered: boolean; message?: string }> {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
 
   const db = getAdminFirestore();
-  let state: MonthlyStateDoc | null = null;
 
-  if (db) {
-    try {
-      const snap = await db.collection('systemConfig').doc('monthly_state').get();
-      if (snap.exists) {
-        state = snap.data() as MonthlyStateDoc;
-      }
-    } catch {
-      // In case Firestore fails, check memory
-      state = memoryMonthlyArchives.state;
+  if (!db || typeof db.collection !== 'function' || typeof db.runTransaction !== 'function' || typeof db.batch !== 'function') {
+    if (
+      memoryMonthlyArchives.state.currentActiveYear === currentYear &&
+      memoryMonthlyArchives.state.currentActiveMonth === currentMonth &&
+      !options?.force
+    ) {
+      return { triggered: false };
     }
-  } else {
-    state = memoryMonthlyArchives.state;
+    const res = await executeMonthRolloverAndArchive({ force: options?.force });
+    return { triggered: true, message: res.message };
   }
 
-  // If already at or ahead of current month, no rollover needed
-  if (state && state.currentActiveYear === currentYear && state.currentActiveMonth === currentMonth) {
+  const stateRef = db.collection('systemConfig').doc('monthly_state');
+
+  // Distributed transaction lock to guarantee strictly once execution across serverless containers
+  let acquiredLock = false;
+  try {
+    acquiredLock = await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(stateRef);
+      const state = snap.exists ? (snap.data() as MonthlyStateDoc) : null;
+      const nowTime = Date.now();
+
+      if (state && !options?.force) {
+        // If already rolled over to current or future month, no rollover needed
+        if (state.currentActiveYear === currentYear && state.currentActiveMonth === currentMonth) {
+          return false;
+        }
+
+        // If another serverless container is executing rollover and holds a valid lock (< 5 mins)
+        if (state.isRolloverRunning && state.rolloverLockUntil) {
+          const lockUntilTime = new Date(state.rolloverLockUntil).getTime();
+          if (lockUntilTime > nowTime) {
+            console.log('[MonthRollover] Another worker holds the active rollover lock until', state.rolloverLockUntil);
+            return false;
+          }
+        }
+      }
+
+      // Acquire lock for 5 minutes
+      const lockUntil = new Date(nowTime + 5 * 60 * 1000).toISOString();
+      transaction.set(
+        stateRef,
+        {
+          isRolloverRunning: true,
+          rolloverLockUntil: lockUntil,
+          rolloverStartedAt: new Date(nowTime).toISOString(),
+          updatedAt: new Date(nowTime).toISOString(),
+        },
+        { merge: true }
+      );
+
+      return true;
+    });
+  } catch (lockErr) {
+    console.error('[MonthRollover] Failed to acquire rollover transaction lock:', lockErr);
+    return { triggered: false, message: 'Could not acquire lock for month rollover.' };
+  }
+
+  if (!acquiredLock) {
     return { triggered: false };
   }
 
-  // Current calendar month is ahead of recorded state: execute automated rollover!
+  // Execute rollover under acquired distributed lock
   try {
     const res = await executeMonthRolloverAndArchive({
       actor: {
-        id: 'SYSTEM_AUTO_ROLLOVER',
-        name: 'Automated Calendar Month Rollover',
+        id: options?.actorId || 'SYSTEM_AUTO_ROLLOVER',
+        name: options?.actorName || 'Automated Calendar Month Rollover',
         role: 'superadmin',
         branch: 'All',
       },
+      force: options?.force,
     });
     return { triggered: true, message: res.message };
-  } catch (err) {
-    console.error('[MonthRollover] Automated rollover execution failed:', err);
+  } catch (execErr) {
+    console.error('[MonthRollover] Automated rollover execution failed:', execErr);
+    // Release lock on failure so subsequent attempts can proceed
+    try {
+      await stateRef.set({
+        isRolloverRunning: false,
+        rolloverLockUntil: null,
+      }, { merge: true });
+    } catch {
+      // Non-blocking cleanup
+    }
     return { triggered: false, message: 'Automated rollover encountered an error.' };
   }
 }
 
 /**
  * Fetch archived monthly attendance records.
+ * Returns records sorted by year descending, month descending, and employee name ascending.
  */
 export async function getFirestoreMonthlyAttendanceArchives(filters: {
   year?: number;
@@ -631,12 +759,17 @@ export async function getFirestoreMonthlyAttendanceArchives(filters: {
 }): Promise<GSSMonthlyAttendanceArchive[]> {
   const db = getAdminFirestore();
   if (!db) {
-    return Array.from(memoryMonthlyArchives.attendance.values()).filter(a => {
+    const filtered = Array.from(memoryMonthlyArchives.attendance.values()).filter(a => {
       if (filters.year && a.year !== filters.year) return false;
       if (filters.month && a.month !== filters.month) return false;
       if (filters.branch && filters.branch !== 'All' && a.branch.toLowerCase() !== filters.branch.toLowerCase()) return false;
-      if (filters.staffId && a.staffId !== filters.staffId) return false;
+      if (filters.staffId && a.staffId !== filters.staffId && a.employeeId !== filters.staffId) return false;
       return true;
+    });
+    return filtered.sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year;
+      if (a.month !== b.month) return b.month - a.month;
+      return (a.employeeName || '').localeCompare(b.employeeName || '');
     });
   }
 
@@ -651,11 +784,82 @@ export async function getFirestoreMonthlyAttendanceArchives(filters: {
     }
 
     const snap = await q.get();
-    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as GSSMonthlyAttendanceArchive));
+    const archives = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as GSSMonthlyAttendanceArchive));
+
+    return archives.sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year;
+      if (a.month !== b.month) return b.month - a.month;
+      return (a.employeeName || '').localeCompare(b.employeeName || '');
+    });
   } catch (err) {
     console.error('[MonthRollover] Error fetching attendance archives:', err);
     return [];
   }
+}
+
+export interface StaffLifetimeAttendanceHistory {
+  staffId: string;
+  employeeName: string;
+  totalMonthsArchived: number;
+  lifetimeWorkingDays: number;
+  lifetimePresentDays: number;
+  lifetimeLateDays: number;
+  lifetimeHalfDays: number;
+  lifetimeAbsentDays: number;
+  overallAttendancePercentage: number;
+  overallPunctualityPercentage: number;
+  totalLifetimeHours: number;
+  monthlyRecords: GSSMonthlyAttendanceArchive[];
+}
+
+/**
+ * Retrieves the complete lifetime month-by-month attendance history and
+ * cumulative performance metrics for a specific staff member.
+ */
+export async function getStaffLifetimeAttendanceHistory(
+  staffId: string
+): Promise<StaffLifetimeAttendanceHistory | null> {
+  const records = await getFirestoreMonthlyAttendanceArchives({ staffId });
+  if (records.length === 0) return null;
+
+  let totalWorkingDays = 0;
+  let presentDays = 0;
+  let lateDays = 0;
+  let halfDays = 0;
+  let absentDays = 0;
+  let totalHours = 0;
+
+  for (const r of records) {
+    totalWorkingDays += r.totalWorkingDays || 0;
+    presentDays += r.presentDays || 0;
+    lateDays += r.lateDays || 0;
+    halfDays += r.halfDays || 0;
+    absentDays += r.absentDays || 0;
+    totalHours += r.totalHoursWorked || 0;
+  }
+
+  const effectivePresent = presentDays + lateDays + (halfDays * 0.5);
+  const overallAttendancePercentage = totalWorkingDays > 0
+    ? Number(((effectivePresent / totalWorkingDays) * 100).toFixed(1))
+    : 100;
+  const overallPunctualityPercentage = (presentDays + lateDays) > 0
+    ? Number(((presentDays / (presentDays + lateDays)) * 100).toFixed(1))
+    : 100;
+
+  return {
+    staffId,
+    employeeName: records[0].employeeName,
+    totalMonthsArchived: records.length,
+    lifetimeWorkingDays: totalWorkingDays,
+    lifetimePresentDays: presentDays,
+    lifetimeLateDays: lateDays,
+    lifetimeHalfDays: halfDays,
+    lifetimeAbsentDays: absentDays,
+    overallAttendancePercentage,
+    overallPunctualityPercentage,
+    totalLifetimeHours: Number(totalHours.toFixed(1)),
+    monthlyRecords: records,
+  };
 }
 
 /**

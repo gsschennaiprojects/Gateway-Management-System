@@ -10,6 +10,10 @@ jest.mock('@/lib/worklogs/worklog-store', () => ({
   addWorkLog: jest.fn(),
 }));
 
+jest.mock('@/lib/attendance/month-rollover-service', () => ({
+  checkAndAutoExecuteMonthRollover: jest.fn().mockResolvedValue({ triggered: false }),
+}));
+
 describe('auto-attendance-service: registerStaffAttendanceOnLogin', () => {
   const activeUser: User = {
     id: 'GSSEMP684',
@@ -37,6 +41,7 @@ describe('auto-attendance-service: registerStaffAttendanceOnLogin', () => {
   let mockDb: {
     collection: jest.Mock;
     runTransaction: jest.Mock;
+    batch: jest.Mock;
   };
 
   beforeEach(() => {
@@ -61,6 +66,10 @@ describe('auto-attendance-service: registerStaffAttendanceOnLogin', () => {
       runTransaction: jest.fn(async (cb) => {
         return await cb(mockTransaction);
       }),
+      batch: jest.fn(() => ({
+        set: jest.fn(),
+        commit: jest.fn().mockResolvedValue(undefined),
+      })),
     };
 
     (getAdminFirestore as jest.Mock).mockReturnValue(mockDb);

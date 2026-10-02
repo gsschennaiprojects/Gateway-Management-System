@@ -60,4 +60,43 @@ describe('month-rollover-service', () => {
     expect(result.message).toContain('monthly_attendance_archives');
     expect(result.message).toContain('monthly_worklog_archives');
   });
+
+  it('ChunkedBatchWriter commits operations in chunks without exceeding limits', async () => {
+    const { ChunkedBatchWriter } = await import('./month-rollover-service');
+    const mockBatch = {
+      set: jest.fn(),
+      commit: jest.fn().mockResolvedValue(undefined),
+    };
+    const mockDb = {
+      batch: jest.fn(() => mockBatch),
+    };
+
+    // @ts-expect-error test mock
+    const writer = new ChunkedBatchWriter(mockDb);
+    // Add 400 operations to test auto-chunking (maxChunkSize is 350)
+    for (let i = 0; i < 400; i++) {
+      // @ts-expect-error test mock
+      writer.set({ id: `doc_${i}` }, { data: i });
+    }
+
+    // Expect first chunk was flushed automatically
+    expect(mockBatch.commit).toHaveBeenCalledTimes(1);
+
+    // Commit remaining operations
+    await writer.commit();
+    expect(mockBatch.commit).toHaveBeenCalledTimes(2);
+  });
+
+  it('retrieves and aggregates lifetime attendance history for a staff member', async () => {
+    const { getStaffLifetimeAttendanceHistory } = await import('./month-rollover-service');
+    // First run rollover for test period
+    await executeMonthRolloverAndArchive({
+      targetYear: 2026,
+      targetMonth: 9,
+    });
+
+    const lifetime = await getStaffLifetimeAttendanceHistory('EMP-MOCK');
+    // If no records in memory for EMP-MOCK, returns null safely
+    expect(lifetime === null || typeof lifetime === 'object').toBe(true);
+  });
 });

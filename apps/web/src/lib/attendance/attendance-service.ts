@@ -85,6 +85,39 @@ export async function getFirestoreStaffAttendanceGrid(params: {
     }
   });
 
+  // If no current records found in staff_attendance, check the long-term monthly_attendance_archives collection
+  if (savedDocsMap.size === 0) {
+    try {
+      const archiveSnap = await db.collection('monthly_attendance_archives')
+        .where('year', '==', year)
+        .where('month', '==', month)
+        .get();
+
+      archiveSnap.forEach(doc => {
+        const d = doc.data();
+        if (d.staffId) {
+          savedDocsMap.set(d.staffId, {
+            id: doc.id,
+            staffId: d.staffId,
+            name: d.employeeName || 'Staff Member',
+            branch: d.branch || '',
+            role: d.role || 'employee',
+            year: d.year,
+            month: d.month,
+            attendance: d.attendanceGrid || {},
+            updatedAt: d.archivedAt,
+            updatedBy: d.archivedBy,
+          });
+          if (d.archivedAt && (!latestUpdate || d.archivedAt > latestUpdate)) {
+            latestUpdate = d.archivedAt;
+          }
+        }
+      });
+    } catch (archiveErr) {
+      console.warn('[AttendanceService] Archive fallback query warning:', archiveErr);
+    }
+  }
+
   // 3. Fetch monthly worklogs to determine punch times and default present states
   const monthStr = String(month).padStart(2, '0');
   const daysInMonth = new Date(year, month, 0).getDate();

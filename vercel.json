@@ -5,6 +5,12 @@
   "outputDirectory": "apps/web/.next",
   "cleanUrls": true,
   "regions": ["bom1"],
+  "crons": [
+    {
+      "path": "/api/cron/month-rollover",
+      "schedule": "5 0 1 * *"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

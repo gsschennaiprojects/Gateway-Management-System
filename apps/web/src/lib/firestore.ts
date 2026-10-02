@@ -46,6 +46,7 @@ export const COLLECTIONS = {
   BRANCH_METRICS: 'branch_metrics',
   MONTHLY_ATTENDANCE_ARCHIVES: 'monthly_attendance_archives',
   MONTHLY_WORKLOG_ARCHIVES: 'monthly_worklog_archives',
+  STAFF_ATTENDANCE_HISTORY: 'staff_attendance_history',
 } as const;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────

@@ -157,4 +157,13 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
   } catch (err) {
     console.error('[AutoAttendance] Error registering attendance on login:', err);
   }
+
+  // 3. Proactive Month-End Rollover & Archiving Check (Non-blocking background execution)
+  // Ensures that on month transition, the previous month's attendance & worklogs are
+  // automatically sealed into separate archive collections immediately.
+  import('@/lib/attendance/month-rollover-service').then(({ checkAndAutoExecuteMonthRollover }) => {
+    checkAndAutoExecuteMonthRollover().catch(err => {
+      console.warn('[AutoAttendance] Background rollover check warning:', err);
+    });
+  }).catch(() => {});
 }
