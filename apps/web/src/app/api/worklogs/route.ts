@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getAdminFirestore, getFirestoreWorklogs, getFirestoreUserById } from '@/lib/firebase/firebase-admin';
-import { calculateWorkingTime, evaluateEntryPunctuality, getLiveDateInfo, parseTasks } from '@/lib/worklogs/worklog-session-utils';
+import {
+  calculateWorkingTime,
+  evaluateEntryPunctuality,
+  getLiveDateInfo,
+  parseTasks,
+  differenceInCalendarDays,
+} from '@/lib/worklogs/worklog-session-utils';
 import { canViewUserWorkLogs } from '@/lib/rbac/permissions';
 import { hasOversizedBody, isSameOriginRequest } from '@/lib/api/request-security';
-import type { StaffAttendanceStatus } from '@/types/worklog';
+import type { StaffAttendanceStatus, WorkLogEntry } from '@/types/worklog';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,10 +22,63 @@ export async function GET(request: NextRequest) {
     const targetUserId = searchParams.get('targetUserId') || session.user.id;
     const target = targetUserId === session.user.id ? session.user : await getFirestoreUserById(targetUserId);
     if (!target || !canViewUserWorkLogs(session.user, target)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    const date = searchParams.get('today') === 'true' ? getLiveDateInfo().isoDate : searchParams.get('date') || undefined;
-    const logs = await getFirestoreWorklogs({ userId: targetUserId, date });
-    const todayLog = logs.find(log => log.date === getLiveDateInfo().isoDate) || null;
-    return NextResponse.json({ logs, summary: null, todayLog, isPunchedIn: !!todayLog?.loginTime, isPunchedOut: !!todayLog?.logoutTime, liveInfo: getLiveDateInfo() });
+    
+    const liveInfo = getLiveDateInfo();
+    const isTodayRequested = searchParams.get('today') === 'true';
+    const dateParam = searchParams.get('date') || undefined;
+
+    // Fetch user worklogs
+    const logs = await getFirestoreWorklogs({ userId: targetUserId, date: isTodayRequested ? undefined : dateParam });
+
+    // 1. Check for today's log
+    let todayLog: WorkLogEntry | null = logs.find(log => log.date === liveInfo.isoDate) || null;
+
+    // 2. If today's log has no active punch or doesn't exist, search for any ongoing unclosed session
+    let activeSessionLog: WorkLogEntry | null = todayLog && todayLog.loginTime && !todayLog.logoutTime ? todayLog : null;
+
+    if (!activeSessionLog && isTodayRequested) {
+      // Find the most recent unclosed worklog across all dates
+      const unclosedLogs = logs
+        .filter(log => log.loginTime && !log.logoutTime)
+        .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+      if (unclosedLogs.length > 0) {
+        const unclosed = unclosedLogs[0];
+        activeSessionLog = unclosed;
+        todayLog = unclosed;
+
+        // If the unclosed session started on a prior calendar day, proactively bridge attendance up to today
+        if (unclosed.date && unclosed.date < liveInfo.isoDate) {
+          try {
+            const { bridgeMultiDayAttendance } = await import('@/lib/attendance/auto-attendance-service');
+            bridgeMultiDayAttendance(target, unclosed.date, liveInfo.isoDate).catch(err => {
+              console.warn('[WorklogAPI] Background multi-day bridge warning:', err);
+            });
+          } catch {
+            // Non-blocking bridge execution
+          }
+        }
+      }
+    }
+
+    const isSpanningDays = !!(todayLog && todayLog.date && todayLog.date < liveInfo.isoDate && !todayLog.logoutTime);
+    const daysElapsed = isSpanningDays ? differenceInCalendarDays(todayLog!.date, liveInfo.isoDate) + 1 : 1;
+
+    return NextResponse.json({
+      logs: isTodayRequested && todayLog ? [todayLog] : logs,
+      summary: null,
+      todayLog: todayLog ? {
+        ...todayLog,
+        isSpanningDays,
+        sessionStartDate: todayLog.date,
+        daysElapsed,
+      } : null,
+      isPunchedIn: !!todayLog?.loginTime,
+      isPunchedOut: !!todayLog?.logoutTime,
+      isSpanningDays,
+      daysElapsed,
+      liveInfo,
+    });
   } catch {
     return NextResponse.json({ error: 'Worklogs are temporarily unavailable.' }, { status: 503 });
   }
@@ -73,6 +132,18 @@ export async function POST(request: NextRequest) {
       if (action === 'punchIn') {
         if (existing?.loginTime) throw new Error('PUNCH_CONFLICT');
         if (plannedTasks.length === 0 || plannedTasks.length > 30) throw new Error('INVALID_TASKS');
+
+        // Check for any unclosed work session from earlier days
+        const wlCol = db.collection('daily_worklogs');
+        if (typeof wlCol.where === 'function') {
+          const unclosedSnap = await wlCol
+            .where('userId', '==', user.id)
+            .where('logoutTime', '==', null)
+            .get();
+          if (unclosedSnap && !unclosedSnap.empty) {
+            throw new Error('PUNCH_CONFLICT');
+          }
+        }
 
         // Precise Entry Punctuality Evaluation
         const punctuality = evaluateEntryPunctuality(currentTime);
@@ -166,47 +237,114 @@ export async function POST(request: NextRequest) {
           }),
         });
       } else if (action === 'save') {
-        if (!existing?.loginTime || existing.logoutTime) throw new Error('PUNCH_CONFLICT');
+        // Resolve active unclosed worklog doc
+        let activeWlRef = ref;
+        let activeWlData = existing;
+        if (!activeWlData?.loginTime || activeWlData.logoutTime) {
+          const wlCol = db.collection('daily_worklogs');
+          if (typeof wlCol.where === 'function') {
+            const unclosedSnap = await wlCol
+              .where('userId', '==', user.id)
+              .where('logoutTime', '==', null)
+              .get();
+            if (unclosedSnap && !unclosedSnap.empty) {
+              activeWlRef = unclosedSnap.docs[0].ref;
+              activeWlData = unclosedSnap.docs[0].data();
+            }
+          }
+        }
+        if (!activeWlData?.loginTime || activeWlData.logoutTime) throw new Error('PUNCH_CONFLICT');
         if (plannedTasks.length === 0 || plannedTasks.length > 30) throw new Error('INVALID_TASKS');
-        result = { ...existing, plannedTasks, updatedAt: timestamp };
-        transaction.update(ref, { plannedTasks, updatedAt: timestamp });
+        result = { ...activeWlData, plannedTasks, updatedAt: timestamp };
+        transaction.update(activeWlRef, { plannedTasks, updatedAt: timestamp });
       } else {
-        if (!existing?.loginTime || existing.logoutTime) throw new Error('PUNCH_CONFLICT');
-        const existingPlan = parseTasks(existing.plannedTasks);
+        // Punch Out / Logout
+        let activeWlRef = ref;
+        let activeWlData = existing;
+
+        if (!activeWlData?.loginTime || activeWlData.logoutTime) {
+          // Check explicitly provided logId
+          const targetDocId = typeof input.logId === 'string' && input.logId ? input.logId : null;
+          if (targetDocId) {
+            const docSnap = await transaction.get(db.collection('daily_worklogs').doc(targetDocId));
+            if (docSnap.exists && docSnap.data()?.loginTime && !docSnap.data()?.logoutTime) {
+              activeWlRef = docSnap.ref;
+              activeWlData = docSnap.data()!;
+            }
+          }
+          if (!activeWlData?.loginTime || activeWlData.logoutTime) {
+            // Find most recent unclosed worklog for this user
+            const wlCol = db.collection('daily_worklogs');
+            if (typeof wlCol.where === 'function') {
+              const unclosedSnap = await wlCol
+                .where('userId', '==', user.id)
+                .where('logoutTime', '==', null)
+                .get();
+              if (unclosedSnap && !unclosedSnap.empty) {
+                activeWlRef = unclosedSnap.docs[0].ref;
+                activeWlData = unclosedSnap.docs[0].data();
+              }
+            }
+          }
+        }
+
+        if (!activeWlData?.loginTime || activeWlData.logoutTime) throw new Error('PUNCH_CONFLICT');
+
+        const existingPlan = parseTasks(activeWlData.plannedTasks);
         if (completedTasks.length === 0 || completedTasks.length > 30) throw new Error('INVALID_TASKS');
         const reason = typeof input.incompleteReason === 'string' ? input.incompleteReason.trim() : '';
         if (completedTasks.length < existingPlan.length && reason.length < 10) throw new Error('INCOMPLETE_REASON');
-        workingCalc = calculateWorkingTime(existing.loginTime, currentTime);
-        if (!workingCalc || workingCalc.totalMinutes <= 0 || workingCalc.totalMinutes > 24 * 60) throw new Error('INVALID_TIME');
 
-        const finalStatus = workingCalc.attendanceStatus;
+        const sessionStartDate = (activeWlData.date as string) || liveInfo.isoDate;
+        const isMultiDay = sessionStartDate !== liveInfo.isoDate;
+        const daysSpanned = isMultiDay ? differenceInCalendarDays(sessionStartDate, liveInfo.isoDate) + 1 : 1;
+
+        workingCalc = calculateWorkingTime(activeWlData.loginTime as string, currentTime, sessionStartDate, liveInfo.isoDate);
+        if (!workingCalc || workingCalc.totalMinutes <= 0) throw new Error('INVALID_TIME');
+
+        const finalStatus = isMultiDay ? 'present' : workingCalc.attendanceStatus;
         const mappedFinalStatus = finalStatus === 'late' ? 'Late' : finalStatus === 'half_day' ? 'Half-Day' : finalStatus === 'present' ? 'Present' : 'Absent';
 
         result = {
-          ...existing,
-          id,
+          ...activeWlData,
           logoutTime: currentTime,
+          logoutDate: liveInfo.isoDate,
           completedTasks,
           incompleteReason: reason,
           hoursLogged: workingCalc.decimalHours,
           totalHours: workingCalc.formatted,
           workingMinutes: workingCalc.totalMinutes,
           attendanceStatus: finalStatus,
+          isMultiDay,
+          daysSpanned,
           updatedAt: timestamp,
         };
-        transaction.update(ref, {
+
+        transaction.update(activeWlRef, {
           logoutTime: currentTime,
+          logoutDate: liveInfo.isoDate,
           completedTasks,
           incompleteReason: reason,
           hoursLogged: workingCalc.decimalHours,
           totalHours: workingCalc.formatted,
           workingMinutes: workingCalc.totalMinutes,
           attendanceStatus: finalStatus,
+          isMultiDay,
+          daysSpanned,
           updatedAt: timestamp,
         });
 
-        // Synchronous Attendance Collection Exit
+        // Synchronous Attendance Collection Exit (on logout date)
         transaction.set(attRef, {
+          attendanceId: attId,
+          date: liveInfo.isoDate,
+          day: liveInfo.dayOfWeek,
+          staffId: user.id,
+          staffName: user.name,
+          role: user.role,
+          branchId: `BR_${user.branch.toUpperCase().substring(0, 3)}`,
+          branch: user.branch,
+          checkIn: (activeWlData.loginTime as string) || currentTime,
           checkOut: currentTime,
           totalHours: workingCalc.decimalHours,
           status: mappedFinalStatus,
@@ -250,11 +388,25 @@ export async function POST(request: NextRequest) {
             hoursWorked: workingCalc.decimalHours,
             finalStatus: mappedFinalStatus,
             completedTasksCount: completedTasks.length,
+            isMultiDay,
+            daysSpanned,
           }),
         });
       }
       transaction.set(projection, { id: projection.id, type: 'worklog.project', entityId: id, branchId: user.branch, action, state: 'pending', attempts: 0, createdAt: timestamp });
     });
+
+    // If session spanned across multiple days, ensure all intervening calendar days are credited as present
+    const spannedDate = typeof result.date === 'string' ? result.date : null;
+    if (spannedDate && spannedDate < liveInfo.isoDate) {
+      try {
+        const { bridgeMultiDayAttendance } = await import('@/lib/attendance/auto-attendance-service');
+        await bridgeMultiDayAttendance(user, spannedDate, liveInfo.isoDate);
+      } catch (bridgeErr) {
+        console.warn('[WorklogAPI] Post-punchout multi-day bridge warning:', bridgeErr);
+      }
+    }
+
     return NextResponse.json({ success: true, entry: result, workingCalc, isPunchedIn: true, isPunchedOut: action === 'punchOut' }, { status: action === 'punchIn' ? 201 : 200 });
   } catch (error) {
     const code = error instanceof Error ? error.message : '';

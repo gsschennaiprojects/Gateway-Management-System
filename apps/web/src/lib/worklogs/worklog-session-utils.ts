@@ -156,30 +156,95 @@ export function evaluateEntryPunctuality(timeStr?: string | null): PunctualityEv
 }
 
 /**
+ * Computes calendar days difference between two ISO dates (YYYY-MM-DD).
+ */
+export function differenceInCalendarDays(startDateStr?: string | null, endDateStr?: string | null): number {
+  if (!startDateStr || !endDateStr) return 0;
+  try {
+    const d1 = new Date(startDateStr + 'T00:00:00Z').getTime();
+    const d2 = new Date(endDateStr + 'T00:00:00Z').getTime();
+    if (isNaN(d1) || isNaN(d2)) return 0;
+    return Math.round((d2 - d1) / (86400 * 1000));
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Returns an array of YYYY-MM-DD date strings for all dates from startDate to endDate inclusive.
+ */
+export function getDatesBetween(startDateStr?: string | null, endDateStr?: string | null): string[] {
+  if (!startDateStr || !endDateStr) return [];
+  const results: string[] = [];
+  try {
+    const curr = new Date(startDateStr + 'T00:00:00Z');
+    const end = new Date(endDateStr + 'T00:00:00Z');
+    if (isNaN(curr.getTime()) || isNaN(end.getTime())) return [startDateStr];
+    // Safety cap at 60 days to prevent runaway loops on malformed inputs
+    let count = 0;
+    while (curr.getTime() <= end.getTime() && count < 60) {
+      const yyyy = curr.getUTCFullYear();
+      const mm = String(curr.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(curr.getUTCDate()).padStart(2, '0');
+      results.push(`${yyyy}-${mm}-${dd}`);
+      curr.setUTCDate(curr.getUTCDate() + 1);
+      count++;
+    }
+  } catch {
+    return [startDateStr];
+  }
+  return results.length > 0 ? results : [startDateStr];
+}
+
+/**
  * Calculate total working time between login and logout times.
+ * Supports multi-day continuous sessions (e.g. login on Oct 1, logout on Oct 3).
  * Integrates punctuality and minimum hours thresholds:
  * - Full-day: >= 7.5 hours (or >= 450 minutes)
  * - Half-day: >= 4.0 hours and < 7.5 hours
  * - Incomplete/Absent: < 4.0 hours
  */
-export function calculateWorkingTime(loginTime?: string | null, logoutTime?: string | null): WorkingTimeCalculation | null {
+export function calculateWorkingTime(
+  loginTime?: string | null,
+  logoutTime?: string | null,
+  startDate?: string | null,
+  endDate?: string | null
+): WorkingTimeCalculation | null {
   const loginMinutes = parseTimeString(loginTime);
   const logoutMinutes = parseTimeString(logoutTime);
 
   if (loginMinutes === null || logoutMinutes === null) return null;
 
-  let diffMinutes = logoutMinutes - loginMinutes;
-  // If logout spans past midnight
-  if (diffMinutes < 0) {
-    diffMinutes += 1440;
+  let diffMinutes = 0;
+  const daysDiff = (startDate && endDate) ? differenceInCalendarDays(startDate, endDate) : 0;
+
+  if (daysDiff > 0) {
+    // Multi-day active session spanning calendar days
+    diffMinutes = (daysDiff * 1440) - loginMinutes + logoutMinutes;
+    if (diffMinutes < 0) diffMinutes = 0;
+  } else {
+    diffMinutes = logoutMinutes - loginMinutes;
+    // If logout spans past midnight in a single overnight shift
+    if (diffMinutes < 0) {
+      diffMinutes += 1440;
+    }
   }
 
   const hours = Math.floor(diffMinutes / 60);
   const minutes = diffMinutes % 60;
   const decimalHours = Math.round((diffMinutes / 60) * 100) / 100;
 
-  const formatted = `${hours} hr${hours !== 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} min${minutes !== 1 ? 's' : ''}` : ''}`;
-  const shortFormatted = `${hours}h${minutes > 0 ? ` ${minutes}m` : ''}`;
+  let formatted = '';
+  let shortFormatted = '';
+
+  if (daysDiff > 0) {
+    const remHours = hours % 24;
+    formatted = `${daysDiff} day${daysDiff > 1 ? 's' : ''} ${remHours} hr${remHours !== 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} min${minutes !== 1 ? 's' : ''}` : ''} (${decimalHours}h total)`;
+    shortFormatted = `${daysDiff}d ${remHours}h ${minutes}m`;
+  } else {
+    formatted = `${hours} hr${hours !== 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} min${minutes !== 1 ? 's' : ''}` : ''}`;
+    shortFormatted = `${hours}h${minutes > 0 ? ` ${minutes}m` : ''}`;
+  }
   
   const isFullDay = decimalHours >= 7.5;
   const isHalfDay = decimalHours >= 4.0 && decimalHours < 7.5;
@@ -187,7 +252,10 @@ export function calculateWorkingTime(loginTime?: string | null, logoutTime?: str
   const punctuality = evaluateEntryPunctuality(loginTime);
   let attendanceStatus: 'present' | 'late' | 'half_day' | 'absent' = 'present';
 
-  if (!isFullDay && !isHalfDay) {
+  if (daysDiff > 0) {
+    // Continuous multi-day attendance is credited as present
+    attendanceStatus = 'present';
+  } else if (!isFullDay && !isHalfDay) {
     attendanceStatus = 'absent';
   } else if (isHalfDay || punctuality.entryStatus === 'half_day') {
     attendanceStatus = 'half_day';
@@ -204,33 +272,57 @@ export function calculateWorkingTime(loginTime?: string | null, logoutTime?: str
     decimalHours,
     formatted,
     shortFormatted,
-    isFullDay,
-    isHalfDay,
+    isFullDay: daysDiff > 0 ? true : isFullDay,
+    isHalfDay: daysDiff > 0 ? false : isHalfDay,
     attendanceStatus,
   };
 }
 
 /**
- * Calculate live elapsed working time from login time until right now.
+ * Calculate live elapsed working time from login time until right now,
+ * supporting multi-day continuous work sessions.
  */
-export function calculateLiveElapsedWorkingTime(loginTime?: string | null): { hours: number; minutes: number; formatted: string; shortFormatted: string } | null {
+export function calculateLiveElapsedWorkingTime(
+  loginTime?: string | null,
+  startDate?: string | null
+): { hours: number; minutes: number; days: number; formatted: string; shortFormatted: string } | null {
   const loginMinutes = parseTimeString(loginTime);
   if (loginMinutes === null) return null;
 
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const live = getLiveDateInfo();
+  const currentMinutes = parseTimeString(live.currentTime) ?? (new Date().getHours() * 60 + new Date().getMinutes());
+  const daysDiff = startDate ? differenceInCalendarDays(startDate, live.isoDate) : 0;
 
-  let diff = currentMinutes - loginMinutes;
-  if (diff < 0) diff += 1440;
+  let diff = 0;
+  if (daysDiff > 0) {
+    diff = (daysDiff * 1440) - loginMinutes + currentMinutes;
+    if (diff < 0) diff = 0;
+  } else {
+    diff = currentMinutes - loginMinutes;
+    if (diff < 0) diff += 1440;
+  }
 
   const hours = Math.floor(diff / 60);
   const minutes = diff % 60;
+  const remHours = hours % 24;
+
+  let formatted = '';
+  let shortFormatted = '';
+
+  if (daysDiff > 0) {
+    formatted = `${daysDiff} day${daysDiff > 1 ? 's' : ''} ${remHours} hr${remHours !== 1 ? 's' : ''} ${minutes} min${minutes !== 1 ? 's' : ''}`;
+    shortFormatted = `${daysDiff}d ${remHours}h ${minutes}m`;
+  } else {
+    formatted = `${hours} hr${hours !== 1 ? 's' : ''} ${minutes} min${minutes !== 1 ? 's' : ''}`;
+    shortFormatted = `${hours}h ${minutes}m`;
+  }
 
   return {
     hours,
     minutes,
-    formatted: `${hours} hr${hours !== 1 ? 's' : ''} ${minutes} min${minutes !== 1 ? 's' : ''}`,
-    shortFormatted: `${hours}h ${minutes}m`,
+    days: daysDiff,
+    formatted,
+    shortFormatted,
   };
 }
 

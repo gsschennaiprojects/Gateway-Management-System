@@ -10,6 +10,9 @@ interface PunchOutConfirmationModalProps {
   onConfirm: () => void;
   saving?: boolean;
   liveDate: LiveDateInfo;
+  sessionStartDate?: string;
+  isSpanningDays?: boolean;
+  daysElapsed?: number;
   loginTime: string;
   plannedTasks: string[];
   completedTasks: string[];
@@ -23,6 +26,9 @@ export function PunchOutConfirmationModal({
   onConfirm,
   saving = false,
   liveDate,
+  sessionStartDate,
+  isSpanningDays,
+  daysElapsed,
   loginTime,
   plannedTasks,
   completedTasks,
@@ -101,6 +107,19 @@ export function PunchOutConfirmationModal({
               </p>
             </div>
           </div>
+
+          {/* Multi-day continuous session banner if applicable */}
+          {isSpanningDays && (
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+              <div className="flex items-center gap-1.5 font-bold">
+                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                <span>Multi-Day Session (Day {daysElapsed || 1})</span>
+              </div>
+              <p className="text-[11px] opacity-90 leading-relaxed">
+                Started on <strong>{sessionStartDate}</strong> at <strong>{loginTime}</strong>. Finalizing now records all days as Present in your attendance record.
+              </p>
+            </div>
+          )}
 
           {/* Metrics Summary Grid */}
           <div className="grid grid-cols-2 gap-3">

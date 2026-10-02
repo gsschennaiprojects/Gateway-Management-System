@@ -118,4 +118,8 @@ export function clearTodayWorkLog(userId: string, date: string): void {
   serverWorkLogs = serverWorkLogs.filter((l) => !(l.userId === userId && (l.date === date || l.date.replace(/-/g, '') === date.replace(/-/g, ''))));
 }
 
+export function getActiveUnclosedWorkLog(userId: string): WorkLogEntry | undefined {
+  return serverWorkLogs.find((l) => l.userId === userId && l.loginTime && !l.logoutTime);
+}
+
 

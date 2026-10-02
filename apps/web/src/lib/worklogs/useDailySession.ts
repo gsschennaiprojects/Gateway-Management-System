@@ -28,6 +28,7 @@ import {
   parseTasks,
   LiveDateInfo,
   WorkingTimeCalculation,
+  differenceInCalendarDays,
 } from './worklog-session-utils';
 
 export interface DailySessionState {
@@ -40,8 +41,12 @@ export interface DailySessionState {
   incompleteReason: string;
   totalHours: string;
   workingCalc: WorkingTimeCalculation | null;
-  elapsedTime: { hours: number; minutes: number; formatted: string; shortFormatted: string } | null;
+  elapsedTime: { hours: number; minutes: number; days?: number; formatted: string; shortFormatted: string } | null;
   liveDate: LiveDateInfo;
+  sessionStartDate: string;
+  isSpanningDays: boolean;
+  daysElapsed: number;
+  activeLogId: string;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -54,6 +59,10 @@ const SYNC_EVENT_NAME = 'gss-daily-session-updated';
 export function useDailySession() {
   const { user } = useAuth();
   const [liveDate, setLiveDate] = useState<LiveDateInfo>(getLiveDateInfo());
+  const [sessionStartDate, setSessionStartDate] = useState<string>('');
+  const [isSpanningDays, setIsSpanningDays] = useState<boolean>(false);
+  const [daysElapsed, setDaysElapsed] = useState<number>(1);
+  const [activeLogId, setActiveLogId] = useState<string>('');
   const [loginTime, setLoginTime] = useState<string>('');
   const [logoutTime, setLogoutTime] = useState<string>('');
   const [plannedTasks, setPlannedTasks] = useState<string[]>([]);
@@ -69,7 +78,7 @@ export function useDailySession() {
   const [isPunchOutModalOpen, setIsPunchOutModalOpen] = useState<boolean>(false);
 
   // Live timer for elapsed time
-  const [elapsedTime, setElapsedTime] = useState<{ hours: number; minutes: number; formatted: string; shortFormatted: string } | null>(null);
+  const [elapsedTime, setElapsedTime] = useState<{ hours: number; minutes: number; days?: number; formatted: string; shortFormatted: string } | null>(null);
 
   const storageKey = user ? `${SESSION_STORAGE_KEY_PREFIX}${user.id}_${liveDate.isoDate}` : null;
 
@@ -86,26 +95,26 @@ export function useDailySession() {
       const nowInfo = getLiveDateInfo();
       setLiveDate(nowInfo);
       if (loginTime && !logoutTime) {
-        setElapsedTime(calculateLiveElapsedWorkingTime(loginTime));
+        setElapsedTime(calculateLiveElapsedWorkingTime(loginTime, sessionStartDate));
       }
     }, 15000);
     return () => clearInterval(timer);
-  }, [loginTime, logoutTime]);
+  }, [loginTime, logoutTime, sessionStartDate]);
 
   // Recalculate working time or elapsed time whenever login/logout times change
   useEffect(() => {
     if (loginTime && logoutTime) {
-      const calc = calculateWorkingTime(loginTime, logoutTime);
+      const calc = calculateWorkingTime(loginTime, logoutTime, sessionStartDate, liveDate.isoDate);
       if (calc) {
         queueMicrotask(() => setTotalHours(calc.decimalHours.toFixed(2)));
       }
       queueMicrotask(() => setElapsedTime(null));
     } else if (loginTime && !logoutTime) {
-      queueMicrotask(() => setElapsedTime(calculateLiveElapsedWorkingTime(loginTime)));
+      queueMicrotask(() => setElapsedTime(calculateLiveElapsedWorkingTime(loginTime, sessionStartDate)));
     } else {
       queueMicrotask(() => setElapsedTime(null));
     }
-  }, [loginTime, logoutTime]);
+  }, [loginTime, logoutTime, sessionStartDate, liveDate.isoDate]);
 
   // Load authoritative session state from Firestore via server API
   const loadSession = useCallback(async () => {
@@ -130,6 +139,14 @@ export function useDailySession() {
           const log = data.todayLog;
           const parsedPlanned = parseTasks(log.plannedTasks);
           const parsedCompleted = parseTasks(log.completedTasks);
+          const startDate = log.sessionStartDate || log.date || '';
+          const spanning = !!log.isSpanningDays || (!!startDate && startDate < getLiveDateInfo().isoDate && !log.logoutTime);
+          const elapsed = typeof log.daysElapsed === 'number' ? log.daysElapsed : (startDate ? differenceInCalendarDays(startDate, getLiveDateInfo().isoDate) + 1 : 1);
+
+          setActiveLogId(log.id || '');
+          setSessionStartDate(startDate);
+          setIsSpanningDays(spanning);
+          setDaysElapsed(elapsed);
 
           if (log.loginTime) {
             setLoginTime(log.loginTime);
@@ -155,6 +172,10 @@ export function useDailySession() {
           }
         } else {
           // Do NOT auto-punch on login. Staff explicitly clicks Punch In.
+          setActiveLogId('');
+          setSessionStartDate('');
+          setIsSpanningDays(false);
+          setDaysElapsed(1);
           setIsPunchedIn(false);
           setLoginTime('');
           setLogoutTime('');
@@ -277,6 +298,8 @@ export function useDailySession() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'punchOut',
+            logId: activeLogId || undefined,
+            sessionStartDate: sessionStartDate || undefined,
             loginTime,
             logoutTime: timeToSet,
             date: nowInfo.isoDate,
@@ -293,7 +316,7 @@ export function useDailySession() {
         }
 
         const recordedLogoutTime = data.entry?.logoutTime || timeToSet;
-        const workingCalc = data.workingCalc || calculateWorkingTime(loginTime, recordedLogoutTime);
+        const workingCalc = data.workingCalc || calculateWorkingTime(loginTime, recordedLogoutTime, sessionStartDate, nowInfo.isoDate);
         const formattedTotal = workingCalc ? workingCalc.formatted : 'Unavailable';
 
         setLogoutTime(recordedLogoutTime);
@@ -315,7 +338,7 @@ export function useDailySession() {
         return false;
       }
     },
-    [loginTime, plannedTasks, completedTasks, incompleteReason, broadcastSync]
+    [loginTime, activeLogId, sessionStartDate, plannedTasks, completedTasks, incompleteReason, broadcastSync]
   );
 
   // ── Step 1 of 2: Request Punch Out (Validates and opens confirmation modal) ─
@@ -462,10 +485,14 @@ export function useDailySession() {
     [broadcastSync]
   );
 
-  const workingCalc = calculateWorkingTime(loginTime, logoutTime);
+  const workingCalc = calculateWorkingTime(loginTime, logoutTime, sessionStartDate, liveDate.isoDate);
 
   return {
     liveDate,
+    sessionStartDate,
+    isSpanningDays,
+    daysElapsed,
+    activeLogId,
     loginTime,
     setLoginTime: (t: string) => {
       setLoginTime(t);

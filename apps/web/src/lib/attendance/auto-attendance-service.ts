@@ -1,10 +1,106 @@
 import { getAdminFirestore } from '@/lib/firebase/firebase-admin';
-import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
+import { getLiveDateInfo, getDatesBetween } from '@/lib/worklogs/worklog-session-utils';
 import type { User } from '@/types/auth';
 
 /**
+ * Bridges attendance across multiple calendar days (startDate through endDate inclusive).
+ * Marks all intermediate days as 'present' in staff_attendance matrix and attendance collection.
+ */
+export async function bridgeMultiDayAttendance(
+  user: User | { id: string; name: string; role?: string; branch?: string; employeeId?: string },
+  startDate: string,
+  endDate: string
+): Promise<void> {
+  const db = getAdminFirestore();
+  if (!db || !startDate || !endDate || typeof db.batch !== 'function') return;
+
+  const dates = getDatesBetween(startDate, endDate);
+  if (dates.length === 0) return;
+
+  const staffId = user.id;
+  const name = user.name;
+  const branch = user.branch || 'Universal';
+  const role = user.role || 'employee';
+  const employeeId = user.employeeId || user.id;
+  const timestamp = new Date().toISOString();
+
+  // Group dates by year and month for efficient staff_attendance batching
+  const monthGroups = new Map<string, { year: number; month: number; days: number[] }>();
+  for (const dateStr of dates) {
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) continue;
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    const key = `att_${staffId}_${y}_${m}`;
+    if (!monthGroups.has(key)) {
+      monthGroups.set(key, { year: y, month: m, days: [] });
+    }
+    monthGroups.get(key)!.days.push(d);
+  }
+
+  try {
+    const batch = db.batch();
+
+    // 1. Update staff_attendance grids
+    for (const [gridDocId, group] of monthGroups.entries()) {
+      const gridRef = db.collection('staff_attendance').doc(gridDocId);
+      const gridSnap = await gridRef.get();
+      const gridData = gridSnap.exists ? (gridSnap.data() as Record<string, unknown>) : {
+        id: gridDocId,
+        staffId,
+        employeeId,
+        name,
+        branch,
+        role,
+        year: group.year,
+        month: group.month,
+        attendance: {},
+      };
+      const currentAttMap = { ...((gridData.attendance as Record<string, string>) || {}) };
+      for (const dayNum of group.days) {
+        if (!currentAttMap[dayNum]) {
+          currentAttMap[dayNum] = 'present';
+        }
+      }
+      batch.set(gridRef, {
+        ...gridData,
+        attendance: currentAttMap,
+        updatedAt: timestamp,
+        updatedBy: { id: staffId, name, role },
+      }, { merge: true });
+    }
+
+    // 2. Ensure daily attendance records exist
+    for (const dateStr of dates) {
+      const attDocId = `ATT_${staffId}_${dateStr.replace(/-/g, '')}`;
+      const attRef = db.collection('attendance').doc(attDocId);
+      batch.set(attRef, {
+        attendanceId: attDocId,
+        id: attDocId,
+        staffId,
+        employeeId,
+        staffName: name,
+        name,
+        role,
+        branch,
+        date: dateStr,
+        status: 'Present',
+        markedBy: 'Continuous Multi-Day Session',
+        updatedAt: timestamp,
+      }, { merge: true });
+    }
+
+    await batch.commit();
+  } catch (err) {
+    console.warn('[AutoAttendance] bridgeMultiDayAttendance warning:', err);
+  }
+}
+
+/**
  * Automatically registers attendance as 'present' when a staff member logs in.
- * Until a staff member logs in, their attendance for today remains blank (unrecorded).
+ * If an active unclosed session exists from a previous day, it carries forward seamlessly,
+ * bridging attendance for all intervening days until they logout with completed tasks.
  */
 export async function registerStaffAttendanceOnLogin(user: User): Promise<void> {
   // Only active staff members register attendance
@@ -43,6 +139,32 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
   if (!db) return;
 
   try {
+    // Check if staff has an unclosed work session from a prior date
+    try {
+      const wlCol = db.collection('daily_worklogs');
+      if (typeof wlCol.where === 'function') {
+        const unclosedSnap = await wlCol
+          .where('userId', '==', staffId)
+          .where('logoutTime', '==', null)
+          .get();
+
+        if (unclosedSnap && !unclosedSnap.empty) {
+          // Sort to find earliest or latest active unclosed doc
+          const docs = unclosedSnap.docs.map(d => d.data() as Record<string, unknown>);
+          const activeDoc = docs.find(d => typeof d.date === 'string' && d.loginTime);
+          if (activeDoc && typeof activeDoc.date === 'string') {
+            const startDate = activeDoc.date;
+            // Bridge all intermediate days up to today as present
+            await bridgeMultiDayAttendance(user, startDate, isoDate);
+            console.log(`[AutoAttendance] Carried forward active multi-day session for ${user.name} from ${startDate} to ${isoDate}`);
+            return;
+          }
+        }
+      }
+    } catch (unclosedErr) {
+      console.warn('[AutoAttendance] Active session check note:', unclosedErr);
+    }
+
     const gridDocId = `att_${staffId}_${year}_${month}`;
     const attDocId = `ATT_${staffId}_${isoDate.replace(/-/g, '')}`;
     const wlDocId = `WL_${staffId}_${isoDate.replace(/-/g, '')}`;

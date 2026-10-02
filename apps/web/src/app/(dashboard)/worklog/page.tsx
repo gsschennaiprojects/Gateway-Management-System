@@ -45,6 +45,9 @@ export default function WorklogPage() {
   // Unified Daily Worklog & Punch Session Hook
   const {
     liveDate,
+    sessionStartDate,
+    isSpanningDays,
+    daysElapsed,
     loginTime,
     setLoginTime,
     logoutTime,
@@ -216,6 +219,26 @@ export default function WorklogPage() {
             </span>
           </div>
         </div>
+
+        {/* Continuous Multi-Day Active Session Notice */}
+        {isSpanningDays && (
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 flex items-start gap-3">
+            <Timer className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-xs uppercase tracking-wider bg-amber-200/80 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 px-2.5 py-0.5 rounded-full">
+                  Continuous Multi-Day Session Active • Day {daysElapsed}
+                </span>
+                <span className="text-xs font-semibold">
+                  Started on {sessionStartDate} at {loginTime}
+                </span>
+              </div>
+              <p className="text-xs opacity-90 leading-relaxed">
+                Your session and planned tasks continue uninterrupted across days until you logout with completed tasks. All days in this active session are recorded as Present.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Interactive Punch In & Punch Out Action Controls */}
         <div className="p-4 sm:p-5 rounded-2xl bg-[var(--bg-canvas,#F8FAFD)] border border-[var(--border-subtle,#E8EAED)] space-y-4">
@@ -648,6 +671,9 @@ export default function WorklogPage() {
         onConfirm={confirmPunchOut}
         saving={saving}
         liveDate={liveDate}
+        sessionStartDate={sessionStartDate}
+        isSpanningDays={isSpanningDays}
+        daysElapsed={daysElapsed}
         loginTime={loginTime}
         plannedTasks={plannedTasks}
         completedTasks={completedTasks}
