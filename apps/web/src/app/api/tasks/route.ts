@@ -99,16 +99,82 @@ export async function PATCH(request: NextRequest) {
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
-    const { taskId, status, reason: rawReason } = body as { taskId?: unknown; status?: unknown; reason?: unknown };
-    const reason = typeof rawReason === 'string' ? rawReason.trim() : '';
-    if (typeof taskId !== 'string' || taskId.length > 150 || !['pending', 'in_progress', 'completed', 'partially_stopped'].includes(String(status))) return NextResponse.json({ error: 'Invalid task transition.' }, { status: 400 });
-    if (status === 'partially_stopped' && (reason.length < 10 || reason.length > 1000)) return NextResponse.json({ error: 'Provide a reason of at least 10 characters for a partially stopped task.' }, { status: 400 });
+    const input = body as Record<string, unknown>;
+    const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : '';
+    if (!taskId || taskId.length > 150) return NextResponse.json({ error: 'Task ID is required.' }, { status: 400 });
+
+    const isEditAction = input.action === 'edit_task';
+
+    if (isEditAction) {
+      const isSuperAdmin = session.user.role === 'superadmin';
+      const isAdmin = session.user.role === 'admin';
+      if (!isSuperAdmin && !isAdmin) {
+        return NextResponse.json({ error: 'Forbidden: Only administrators can edit task details.' }, { status: 403 });
+      }
+    } else {
+      const status = input.status as string;
+      const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+      if (!['pending', 'in_progress', 'completed', 'partially_stopped'].includes(String(status))) {
+        return NextResponse.json({ error: 'Invalid task transition.' }, { status: 400 });
+      }
+      if (status === 'partially_stopped' && (reason.length < 10 || reason.length > 1000)) {
+        return NextResponse.json({ error: 'Provide a reason of at least 10 characters for a partially stopped task.' }, { status: 400 });
+      }
+    }
+
     const db = getAdminFirestore();
     if (!db) return NextResponse.json({ error: 'Task storage is unavailable.' }, { status: 503 });
     const taskRef = db.collection('tasks').doc(taskId);
     const now = new Date().toISOString();
+
+    // ── CASE A: Super Admin / Admin editing task details ──
+    if (isEditAction) {
+      const isSuperAdmin = session.user.role === 'superadmin';
+
+      const updates: Record<string, unknown> = { updatedAt: now };
+      if (typeof input.title === 'string' && input.title.trim().length >= 2) {
+        updates.title = input.title.trim().slice(0, 200);
+      }
+      if (typeof input.description === 'string') {
+        updates.description = input.description.trim().slice(0, 3000);
+      }
+      if (typeof input.priority === 'string' && ['low', 'medium', 'high', 'urgent'].includes(input.priority)) {
+        updates.priority = input.priority;
+      }
+      if (input.dueDate !== undefined) {
+        const d = String(input.dueDate).trim();
+        if (d === '' || /^\d{4}-\d{2}-\d{2}$/.test(d)) updates.dueDate = d;
+      }
+      if (typeof input.status === 'string' && ['pending', 'in_progress', 'completed', 'partially_stopped'].includes(input.status)) {
+        updates.status = input.status;
+      }
+
+      let updatedTask: Record<string, unknown> = {};
+      await db.runTransaction(async transaction => {
+        const snap = await transaction.get(taskRef);
+        if (!snap.exists) throw new Error('TASK_NOT_FOUND');
+        const existing = snap.data()!;
+        if (!isSuperAdmin && existing.branch !== session.user.branch) throw new Error('TASK_FORBIDDEN');
+        transaction.update(taskRef, updates);
+        transaction.create(db.collection('task_history').doc(`${taskId}:edit:${randomUUID()}`), {
+          taskId,
+          actorUid: session.uid,
+          action: 'admin_edit',
+          updates,
+          createdAt: now,
+        });
+        updatedTask = { id: taskId, ...existing, ...updates };
+      });
+      return NextResponse.json({ success: true, task: updatedTask });
+    }
+
+    // ── CASE B: Status transitions & Resumption ──
+    const status = input.status as string;
+    const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+
     const nextStatus = status as TaskStatus;
     let updated: Record<string, unknown> = {};
+
     await db.runTransaction(async transaction => {
       const taskSnapshot = await transaction.get(taskRef);
       if (!taskSnapshot.exists) throw new Error('TASK_NOT_FOUND');
@@ -117,14 +183,46 @@ export async function PATCH(request: NextRequest) {
       const isManager = session.user.role === 'superadmin' || (session.user.role === 'admin' && task.branch === session.user.branch);
       if (!isAssigned && !isManager) throw new Error('TASK_FORBIDDEN');
       if (task.status === nextStatus) { updated = { id: taskId, ...task }; return; }
-      const allowed = task.status === 'pending' && nextStatus === 'in_progress' || task.status === 'in_progress' && (nextStatus === 'completed' || nextStatus === 'partially_stopped');
+
+      // ALLOWED TRANSITIONS:
+      // 1. pending -> in_progress
+      // 2. in_progress -> completed OR partially_stopped
+      // 3. partially_stopped -> in_progress (RESUMPTION) OR pending
+      // 4. Super Admin can override transition any state
+      const allowed =
+        (task.status === 'pending' && nextStatus === 'in_progress') ||
+        (task.status === 'in_progress' && (nextStatus === 'completed' || nextStatus === 'partially_stopped')) ||
+        (task.status === 'partially_stopped' && (nextStatus === 'in_progress' || nextStatus === 'pending')) ||
+        (session.user.role === 'superadmin');
+
       if (!allowed) throw new Error('TASK_CONFLICT');
-      transaction.update(taskRef, { status: nextStatus, updatedAt: now, ...(nextStatus === 'in_progress' ? { startedAt: now } : {}), ...(nextStatus === 'completed' ? { completedAt: now } : {}), ...(nextStatus === 'partially_stopped' ? { stoppedAt: now, stopReason: reason } : {}) });
-      transaction.create(db.collection('task_history').doc(`${taskId}:${randomUUID()}`), { taskId, actorUid: session.uid, fromStatus: task.status, toStatus: nextStatus, ...(nextStatus === 'partially_stopped' ? { reason } : {}), createdAt: now });
+
+      const isResuming = task.status === 'partially_stopped' && nextStatus === 'in_progress';
+      const statusUpdates: Record<string, unknown> = {
+        status: nextStatus,
+        updatedAt: now,
+        ...(nextStatus === 'in_progress' ? { startedAt: task.startedAt || now } : {}),
+        ...(isResuming ? { resumedAt: now } : {}),
+        ...(nextStatus === 'completed' ? { completedAt: now } : {}),
+        ...(nextStatus === 'partially_stopped' ? { stoppedAt: now, stopReason: reason } : {}),
+      };
+
+      transaction.update(taskRef, statusUpdates);
+      transaction.create(db.collection('task_history').doc(`${taskId}:${randomUUID()}`), {
+        taskId,
+        actorUid: session.uid,
+        fromStatus: task.status,
+        toStatus: nextStatus,
+        ...(nextStatus === 'partially_stopped' ? { reason } : {}),
+        ...(isResuming ? { resumptionNote: reason || 'Task resumed by user' } : {}),
+        createdAt: now,
+      });
+
       const projectionRef = db.collection('projection_jobs').doc(`task:${taskId}:${now}`);
       transaction.create(projectionRef, { id: projectionRef.id, type: 'task.upsert', entityId: taskId, branchId: task.branchId, state: 'pending', attempts: 0, createdAt: now });
-      updated = { id: taskId, ...task, status: nextStatus, updatedAt: now };
+      updated = { id: taskId, ...task, ...statusUpdates };
     });
+
     return NextResponse.json({ success: true, task: updated });
   } catch (error) {
     const code = error instanceof Error ? error.message : '';
@@ -132,5 +230,54 @@ export async function PATCH(request: NextRequest) {
     if (code === 'TASK_FORBIDDEN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     if (code === 'TASK_CONFLICT') return NextResponse.json({ error: 'Task status transition is not allowed.' }, { status: 409 });
     return NextResponse.json({ error: 'Task update could not be saved.' }, { status: 503 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'Request origin is not allowed.' }, { status: 403 });
+
+  // Strictly Super Admin and Admin can delete tasks
+  const isSuperAdmin = session.user.role === 'superadmin';
+  const isAdmin = session.user.role === 'admin';
+  if (!isSuperAdmin && !isAdmin) {
+    return NextResponse.json({ error: 'Forbidden: Only administrators can delete tasks.' }, { status: 403 });
+  }
+
+  const { searchParams } = request.nextUrl;
+  const taskId = searchParams.get('taskId') || searchParams.get('id');
+  if (!taskId) return NextResponse.json({ error: 'Missing taskId parameter.' }, { status: 400 });
+
+  try {
+    const db = getAdminFirestore();
+    if (!db) return NextResponse.json({ error: 'Task storage is unavailable.' }, { status: 503 });
+
+    const taskRef = db.collection('tasks').doc(taskId);
+    const snap = await taskRef.get();
+    if (!snap.exists) {
+      return NextResponse.json({ error: 'Task not found.' }, { status: 404 });
+    }
+
+    const taskData = snap.data()!;
+    if (!isSuperAdmin && taskData.branch !== session.user.branch) {
+      return NextResponse.json({ error: 'Forbidden: Cannot delete tasks outside your branch.' }, { status: 403 });
+    }
+
+    const now = new Date().toISOString();
+    await db.runTransaction(async transaction => {
+      transaction.delete(taskRef);
+      transaction.create(db.collection('task_history').doc(`${taskId}:deleted:${randomUUID()}`), {
+        taskId,
+        actorUid: session.uid,
+        action: 'deleted',
+        deletedAt: now,
+      });
+    });
+
+    return NextResponse.json({ success: true, message: 'Task permanently deleted.' });
+  } catch (err) {
+    console.error('[api/tasks] DELETE error:', err);
+    return NextResponse.json({ error: 'Task could not be deleted.' }, { status: 500 });
   }
 }

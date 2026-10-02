@@ -489,15 +489,6 @@ export default function AttendanceMasterGridPage() {
             </Button>
           )}
 
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => window.print()}
-            leftIcon={<Printer className="w-3.5 h-3.5" />}
-          >
-            Print
-          </Button>
-
           {isSuperAdmin && (
             <Button
               variant="secondary"

@@ -49,6 +49,14 @@ export interface AssignedTask {
   priority: TaskPriority;
   dueDate: string;
   status: TaskStatus;
+  branch?: Branch | string;
+  branchId?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  stopReason?: string;
+  resumedAt?: string;
+  completedAt?: string;
+  updatedAt?: string;
   createdAt: string;
 }
 

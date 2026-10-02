@@ -80,6 +80,16 @@ export function createUser(payload: RegisterPayload & { id?: string }): StoredUs
     startMonthYear: payload.startMonthYear,
     startDate: payload.startDate,
     endDate: payload.endDate,
+    gender: payload.gender,
+    dob: payload.dob,
+    doj: payload.doj || payload.dateOfJoining,
+    dateOfJoining: payload.dateOfJoining || payload.doj,
+    entryTime: payload.entryTime || payload.shiftTiming?.entryTime || '09:30 AM',
+    exitTime: payload.exitTime || payload.shiftTiming?.exitTime || '06:30 PM',
+    shiftTiming: payload.shiftTiming || {
+      entryTime: payload.entryTime || '09:30 AM',
+      exitTime: payload.exitTime || '06:30 PM',
+    },
     createdAt: new Date().toISOString(),
     passwordHash: hashPassword(payload.password)
   };

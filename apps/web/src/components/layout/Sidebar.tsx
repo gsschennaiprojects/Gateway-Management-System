@@ -105,7 +105,7 @@ export const NAV_ITEMS: NavItem[] = [
     shortLabel: 'Users',
     href: '/admin/users',
     icon: <ShieldAlert className="w-5 h-5" />,
-    allowedRoles: ['admin', 'superadmin']
+    allowedRoles: ['admin', 'superadmin', 'hr']
   },
   {
     label: 'System Audit Log',

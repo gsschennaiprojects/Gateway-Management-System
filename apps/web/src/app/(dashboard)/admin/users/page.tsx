@@ -368,15 +368,6 @@ export default function UserManagementPage() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => window.print()}
-            leftIcon={<Printer className="w-3.5 h-3.5" />}
-          >
-            Print / PDF
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
             onClick={handleExportExcel}
             disabled={downloadingFormat !== null}
             leftIcon={

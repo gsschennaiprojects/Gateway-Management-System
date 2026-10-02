@@ -61,6 +61,11 @@ export const SPECIALIZATIONS = DEFAULT_DOMAINS;
 
 export type Specialization = string;
 
+export interface ShiftTiming {
+  entryTime: string; // e.g. "09:30 AM"
+  exitTime: string;  // e.g. "06:30 PM"
+}
+
 /**
  * Canonical Application User Profile.
  * Transmitted to the client only after stripping sensitive credentials (passwordHash).
@@ -75,6 +80,13 @@ export interface User {
   role: UserRole;
   status: UserStatus;
   branch: Branch;
+  gender?: 'male' | 'female' | 'other' | string;
+  dob?: string;                          // Date of Birth: YYYY-MM-DD
+  doj?: string;                          // Date of Joining: YYYY-MM-DD
+  dateOfJoining?: string;                // Canonical alias for doj
+  shiftTiming?: ShiftTiming;             // Maintained strictly by admin, superadmin, hr
+  entryTime?: string;                    // Top-level shift timing shortcut e.g. "09:30 AM"
+  exitTime?: string;                     // Top-level shift timing shortcut e.g. "06:30 PM"
   specialization?: string; // Comma-joined or primary
   specializations?: string[]; // Array of all domains
   majorSpecialization?: string; // The primary domain for student assignment
@@ -104,6 +116,13 @@ export interface RegisterPayload {
   mobile: string;
   requestedRole: UserRole;
   branch: Branch;
+  gender?: 'male' | 'female' | 'other' | string;
+  dob?: string;
+  doj?: string;
+  dateOfJoining?: string;
+  shiftTiming?: ShiftTiming;
+  entryTime?: string;
+  exitTime?: string;
   specializations?: string[];
   specialization?: string;
   majorSpecialization?: string;

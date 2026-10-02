@@ -563,15 +563,6 @@ export default function WorklogPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={() => window.print()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--border-card,#DADCE0)] text-xs font-medium text-[var(--text-secondary,#444746)] hover:bg-[var(--nav-hover-bg,#F1F3F4)] transition cursor-pointer"
-                title="Print or Save as PDF"
-              >
-                <Printer className="w-3.5 h-3.5 text-slate-600" />
-                <span>Print / PDF</span>
-              </button>
-              <button
-                type="button"
                 onClick={handleExportExcel}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--border-card,#DADCE0)] text-xs font-medium text-[var(--text-secondary,#444746)] hover:bg-[var(--nav-hover-bg,#F1F3F4)] transition cursor-pointer"
               >

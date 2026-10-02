@@ -22,7 +22,10 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
-  Printer,
+  Play,
+  Pencil,
+  Trash2,
+  RotateCw,
 } from 'lucide-react';
 import { exportToExcel, exportToDocx } from '@/lib/export-utils';
 import { getLiveDateInfo } from '@/lib/worklogs/worklog-session-utils';
@@ -31,9 +34,21 @@ export default function TasksManagementPage() {
   const { user: currentUser } = useAuth();
   const [tasks, setTasks] = useState<AssignedTask[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Super Admin / Admin Task Edit & Delete states
+  const [editingTask, setEditingTask] = useState<AssignedTask | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editPriority, setEditPriority] = useState<TaskPriority>('medium');
+  const [editDueDate, setEditDueDate] = useState('');
+  const [editStatus, setEditStatus] = useState<TaskStatus>('pending');
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [editFormError, setEditFormError] = useState<string | null>(null);
+  const [isDeletingTaskId, setIsDeletingTaskId] = useState<string | null>(null);
 
   // Task creation modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -143,10 +158,24 @@ export default function TasksManagementPage() {
   };
 
   useEffect(() => {
-    void Promise.resolve().then(() => {
+    fetchTasks();
+    if (canCreate) fetchUsers();
+
+    const interval = setInterval(() => {
       fetchTasks();
-      if (canCreate) fetchUsers();
-    });
+    }, 25000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchTasks();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [currentUser, canCreate]);
 
   // Eligible individual targets: HR, Employee, Intern
@@ -231,11 +260,104 @@ export default function TasksManagementPage() {
       });
       if (res.ok) {
         setTasks((prev) =>
-          prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
+          prev.map((t) => (t.id === taskId ? { ...t, status: newStatus, ...(reason ? { stopReason: reason } : {}) } : t))
         );
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleResumeTask = async (taskId: string) => {
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId, status: 'in_progress', reason: 'Task resumed by user' })
+      });
+      if (res.ok) {
+        setTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, status: 'in_progress' } : t))
+        );
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Failed to resume task.');
+      }
+    } catch (err) {
+      console.error('Failed to resume task', err);
+    }
+  };
+
+  const openEditModal = (task: AssignedTask) => {
+    setEditingTask(task);
+    setEditTitle(task.title);
+    setEditDescription(task.description);
+    setEditPriority(task.priority);
+    setEditDueDate(task.dueDate);
+    setEditStatus(task.status);
+    setEditFormError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEditTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTask) return;
+    if (!editTitle.trim()) {
+      setEditFormError('Task title is required.');
+      return;
+    }
+    setIsSubmittingEdit(true);
+    setEditFormError(null);
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit_task',
+          taskId: editingTask.id,
+          title: editTitle.trim(),
+          description: editDescription.trim(),
+          priority: editPriority,
+          dueDate: editDueDate,
+          status: editStatus,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setEditFormError(data.error || 'Failed to update task.');
+        return;
+      }
+      setTasks((prev) =>
+        prev.map((t) => (t.id === editingTask.id ? { ...t, ...data.task } : t))
+      );
+      setIsEditModalOpen(false);
+      setEditingTask(null);
+    } catch {
+      setEditFormError('Network error while updating task.');
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this task? This action cannot be undone.')) {
+      return;
+    }
+    setIsDeletingTaskId(taskId);
+    try {
+      const res = await fetch(`/api/tasks?taskId=${encodeURIComponent(taskId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      } else {
+        alert(data.error || 'Failed to delete task.');
+      }
+    } catch {
+      alert('Network error while deleting task.');
+    } finally {
+      setIsDeletingTaskId(null);
     }
   };
 
@@ -285,10 +407,11 @@ export default function TasksManagementPage() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => window.print()}
-            leftIcon={<Printer className="w-3.5 h-3.5" />}
+            onClick={fetchTasks}
+            disabled={loading}
+            leftIcon={<RotateCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
           >
-            Print / PDF
+            Refresh
           </Button>
           <Button
             variant="secondary"
@@ -467,17 +590,47 @@ export default function TasksManagementPage() {
                       </span>
                     </div>
 
-                    <StatusChip
-                      status={
-                        task.status === 'completed'
-                          ? 'success'
-                          : task.status === 'in_progress'
-                          ? 'neutral'
-                          : 'warning'
-                      }
-                      label={task.status.replace('_', ' ')}
-                      size="sm"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <StatusChip
+                        status={
+                          task.status === 'completed'
+                            ? 'success'
+                            : task.status === 'in_progress'
+                            ? 'info'
+                            : task.status === 'partially_stopped'
+                            ? 'warning'
+                            : 'neutral'
+                        }
+                        label={task.status.replace('_', ' ')}
+                        size="sm"
+                      />
+
+                      {(isSuperAdmin || (isAdmin && (!task.branch || task.branch === currentUser?.branch))) && (
+                        <div className="flex items-center gap-1 ml-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(task)}
+                            title="Edit Task (Admin)"
+                            className="p-1 rounded-md text-[var(--text-muted,#747775)] hover:text-[var(--brand-primary,#1A73E8)] hover:bg-[var(--bg-card-subtle,#F1F3F4)] transition cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTask(task.id)}
+                            disabled={isDeletingTaskId === task.id}
+                            title="Delete Task (Admin)"
+                            className="p-1 rounded-md text-[var(--text-muted,#747775)] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                          >
+                            {isDeletingTaskId === task.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Title & Description */}
@@ -487,6 +640,16 @@ export default function TasksManagementPage() {
                   <p className="text-xs text-[var(--text-secondary,#444746)] mt-1.5 leading-relaxed">
                     {task.description}
                   </p>
+
+                  {task.status === 'partially_stopped' && (
+                    <div className="mt-2.5 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold">Paused Reason: </span>
+                        <span>{task.stopReason || 'Work temporarily halted.'}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer Metadata & Status Controls */}
@@ -525,6 +688,15 @@ export default function TasksManagementPage() {
                         className="px-3 py-1.5 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium text-xs transition-colors cursor-pointer"
                       >
                         Partially stopped
+                      </button>
+                    )}
+                    {task.status === 'partially_stopped' && (
+                      <button
+                        onClick={() => handleResumeTask(task.id)}
+                        className="px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>Resume Task</span>
                       </button>
                     )}
                     {task.status === 'completed' && (
@@ -780,6 +952,135 @@ export default function TasksManagementPage() {
                   leftIcon={<CheckSquare className="w-4 h-4" />}
                 >
                   Dispatch Task
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Edit Task Modal (Super Admin / Branch Admin) */}
+      {isEditModalOpen && editingTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-panel-entrance">
+          <div className="bg-[var(--bg-card,#FFFFFF)] border border-[var(--border-card,#DADCE0)] rounded-2xl w-full max-w-lg p-6 md:p-8 shadow-2xl relative">
+            <div className="flex items-center justify-between pb-4 border-b border-[var(--border-subtle,#E8EAED)] mb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--brand-container,#E8F0FE)] text-[var(--brand-on-container,#1A73E8)] flex items-center justify-center">
+                  <Pencil className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-[var(--text-primary,#1F1F1F)]">
+                    Edit Task
+                  </h2>
+                  <p className="text-xs text-[var(--text-secondary,#5F6368)]">
+                    Modify deliverable details, priority, due date, or status
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="p-1.5 rounded-full text-[var(--text-muted,#5F6368)] hover:text-[var(--text-primary,#1F1F1F)] hover:bg-[var(--nav-hover-bg,#F1F3F4)] cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {editFormError && (
+              <div className="mb-4 p-3 rounded-xl bg-[var(--badge-danger-bg,#FCE8E6)] border border-[var(--badge-danger-border,#FAD2CF)] text-xs text-[var(--badge-danger-text,#C5221F)] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{editFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditTask} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-[var(--text-secondary,#444746)] mb-1">
+                  Task Title *
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full h-10 px-3 bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] rounded-xl border border-[var(--border-card,#DADCE0)] focus:outline-none focus:border-[var(--brand-primary,#1A73E8)]"
+                  placeholder="Task title..."
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[var(--text-secondary,#444746)] mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  rows={3}
+                  className="w-full p-3 bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] rounded-xl border border-[var(--border-card,#DADCE0)] focus:outline-none focus:border-[var(--brand-primary,#1A73E8)] resize-none"
+                  placeholder="Task details and scope..."
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[var(--text-secondary,#444746)] mb-1">
+                    Priority
+                  </label>
+                  <select
+                    value={editPriority}
+                    onChange={(e) => setEditPriority(e.target.value as TaskPriority)}
+                    className="w-full h-10 px-3 bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] rounded-xl border border-[var(--border-card,#DADCE0)] focus:outline-none focus:border-[var(--brand-primary,#1A73E8)]"
+                  >
+                    <option value="low">Low Priority</option>
+                    <option value="medium">Medium Priority</option>
+                    <option value="high">High Priority</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[var(--text-secondary,#444746)] mb-1">
+                    Due Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="w-full h-10 px-3 bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] rounded-xl border border-[var(--border-card,#DADCE0)] focus:outline-none focus:border-[var(--brand-primary,#1A73E8)]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[var(--text-secondary,#444746)] mb-1">
+                  Status
+                </label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as TaskStatus)}
+                  className="w-full h-10 px-3 bg-[var(--bg-card,#FFFFFF)] text-xs text-[var(--text-primary,#1F1F1F)] rounded-xl border border-[var(--border-card,#DADCE0)] focus:outline-none focus:border-[var(--brand-primary,#1A73E8)] font-medium"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="partially_stopped">Partially Stopped</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-[var(--border-subtle,#E8EAED)]">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setIsEditModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  isLoading={isSubmittingEdit}
+                  leftIcon={<Check className="w-4 h-4" />}
+                >
+                  Save Changes
                 </Button>
               </div>
             </form>

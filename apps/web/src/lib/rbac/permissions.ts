@@ -81,6 +81,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view_employee_directory',
     'edit_employee_attendance',
     'view_employee_attendance_readonly',
+    'manage_users', // scoped to their branch
     'manage_leads',
     'manage_email_campaigns',
     'view_work_logs', // for Employee, Intern
@@ -128,7 +129,7 @@ export function getDefaultDashboardRoute(role: UserRole): string {
 /**
  * Check if the actor can view or manage targetUser.
  * Super Admin can access all branches.
- * Admin can only access targetUser if targetUser is in the same branch.
+ * Admin and HR can only access targetUser if targetUser is in the same branch.
  */
 export function canManageTargetUser(actor: User, targetUser: User): boolean {
   if (actor.role === 'superadmin') return true;
@@ -137,6 +138,13 @@ export function canManageTargetUser(actor: User, targetUser: User): boolean {
     // Admin cannot modify superadmins
     if (targetUser.role === 'superadmin') return false;
     // Admin can only manage users in their own branch
+    return actor.branch === targetUser.branch;
+  }
+
+  if (actor.role === 'hr') {
+    // HR cannot modify superadmins or admins
+    if (targetUser.role === 'superadmin' || targetUser.role === 'admin') return false;
+    // HR can only manage users in their own branch
     return actor.branch === targetUser.branch;
   }
 

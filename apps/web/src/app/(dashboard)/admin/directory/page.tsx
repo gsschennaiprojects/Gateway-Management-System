@@ -484,16 +484,7 @@ export default function EmployeeDirectoryPage() {
             </select>
           )}
 
-          {/* Export Roster Buttons: Print/PDF, Excel, DOCX */}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => window.print()}
-            leftIcon={<Printer className="w-3.5 h-3.5" />}
-          >
-            Print / PDF
-          </Button>
-
+          {/* Export Roster Buttons: Excel, DOCX */}
           <Button
             variant="secondary"
             size="sm"
@@ -951,14 +942,6 @@ export default function EmployeeDirectoryPage() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => window.print()}
-                      leftIcon={<Printer className="w-3.5 h-3.5" />}
-                    >
-                      Print / PDF
-                    </Button>
                     <Button
                       variant="secondary"
                       size="sm"

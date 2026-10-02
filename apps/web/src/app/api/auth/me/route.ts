@@ -28,6 +28,16 @@ export async function GET() {
         specialization: dbUser.specialization || session.user.specialization,
         specializations: dbUser.specializations || session.user.specializations,
         majorSpecialization: dbUser.majorSpecialization || session.user.majorSpecialization,
+        gender: dbUser.gender || session.user.gender,
+        dob: dbUser.dob || session.user.dob,
+        doj: dbUser.doj || session.user.doj || dbUser.dateOfJoining || session.user.dateOfJoining,
+        dateOfJoining: dbUser.dateOfJoining || session.user.dateOfJoining || dbUser.doj || session.user.doj,
+        entryTime: dbUser.entryTime || session.user.entryTime || '09:30 AM',
+        exitTime: dbUser.exitTime || session.user.exitTime || '06:30 PM',
+        shiftTiming: dbUser.shiftTiming || session.user.shiftTiming || {
+          entryTime: dbUser.entryTime || session.user.entryTime || '09:30 AM',
+          exitTime: dbUser.exitTime || session.user.exitTime || '06:30 PM',
+        },
       };
     } else {
       const { findUserById } = await import('@/lib/auth/user-store');
@@ -46,6 +56,16 @@ export async function GET() {
           specialization: memUser.specialization,
           specializations: memUser.specializations,
           majorSpecialization: memUser.majorSpecialization,
+          gender: memUser.gender || session.user.gender,
+          dob: memUser.dob || session.user.dob,
+          doj: memUser.doj || session.user.doj || memUser.dateOfJoining || session.user.dateOfJoining,
+          dateOfJoining: memUser.dateOfJoining || session.user.dateOfJoining || memUser.doj || session.user.doj,
+          entryTime: memUser.entryTime || session.user.entryTime || '09:30 AM',
+          exitTime: memUser.exitTime || session.user.exitTime || '06:30 PM',
+          shiftTiming: memUser.shiftTiming || session.user.shiftTiming || {
+            entryTime: memUser.entryTime || session.user.entryTime || '09:30 AM',
+            exitTime: memUser.exitTime || session.user.exitTime || '06:30 PM',
+          },
         };
       }
     }
