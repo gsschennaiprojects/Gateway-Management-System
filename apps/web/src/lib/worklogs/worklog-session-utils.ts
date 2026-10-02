@@ -117,30 +117,35 @@ export function formatMinutesTo12Hour(minutes: number): string {
 }
 
 /**
- * Evaluate entry time punctuality against GSS office shift policy:
- * - 09:00 AM standard arrival.
- * - Grace period up to 09:30 AM (inclusive) -> On Time.
- * - 09:31 AM to 01:00 PM -> Late with calculated minutes late.
- * - After 01:00 PM -> Half-day entry session.
+/**
+ * Evaluate entry time punctuality against staff shift timing:
+ * - shiftEntryTime: Configured entry timing for the staff (default: "09:30 AM").
+ * - Arrival on or before shiftEntryTime -> On Time.
+ * - Even 1 minute after shiftEntryTime (e.g. 09:31 AM for 09:30 AM shift) -> Late with exact minutes late.
+ * - After 01:00 PM (or 3.5 hrs after shift) -> Half-day entry session.
  */
-export function evaluateEntryPunctuality(timeStr?: string | null): PunctualityEvaluation {
+export function evaluateEntryPunctuality(
+  timeStr?: string | null,
+  shiftEntryTime?: string | null
+): PunctualityEvaluation {
   const minutes = parseTimeString(timeStr);
   if (minutes === null) {
     return { isLate: false, minutesLate: 0, entryStatus: 'on_time', statusLabel: 'On Time' };
   }
 
-  const graceMinutes = 570; // 09:30 AM (9*60 + 30)
-  const afternoonMinutes = 780; // 01:00 PM (13*60)
+  // Parse configured shift entry timing (default: 09:30 AM = 570 mins)
+  const shiftMinutes = parseTimeString(shiftEntryTime) ?? 570;
+  const afternoonMinutes = Math.max(780, shiftMinutes + 210); // 01:00 PM (780 mins) or 3.5 hrs after shift
 
-  if (minutes <= graceMinutes) {
+  if (minutes <= shiftMinutes) {
     return {
       isLate: false,
       minutesLate: 0,
       entryStatus: 'on_time',
-      statusLabel: 'On Time (Within Grace Period)',
+      statusLabel: 'On Time',
     };
-  } else if (minutes <= afternoonMinutes) {
-    const lateBy = minutes - graceMinutes;
+  } else if (minutes < afternoonMinutes) {
+    const lateBy = minutes - shiftMinutes;
     return {
       isLate: true,
       minutesLate: lateBy,
@@ -148,7 +153,7 @@ export function evaluateEntryPunctuality(timeStr?: string | null): PunctualityEv
       statusLabel: `Late by ${lateBy} min${lateBy !== 1 ? 's' : ''}`,
     };
   } else {
-    const lateBy = minutes - graceMinutes;
+    const lateBy = minutes - shiftMinutes;
     return {
       isLate: true,
       minutesLate: lateBy,
@@ -211,7 +216,8 @@ export function calculateWorkingTime(
   loginTime?: string | null,
   logoutTime?: string | null,
   startDate?: string | null,
-  endDate?: string | null
+  endDate?: string | null,
+  shiftEntryTime?: string | null
 ): WorkingTimeCalculation | null {
   const loginMinutes = parseTimeString(loginTime);
   const logoutMinutes = parseTimeString(logoutTime);
@@ -252,7 +258,7 @@ export function calculateWorkingTime(
   const isFullDay = decimalHours >= 7.5;
   const isHalfDay = decimalHours >= 4.0 && decimalHours < 7.5;
 
-  const punctuality = evaluateEntryPunctuality(loginTime);
+  const punctuality = evaluateEntryPunctuality(loginTime, shiftEntryTime);
   let attendanceStatus: 'present' | 'late' | 'half_day' | 'absent' = 'present';
 
   if (daysDiff > 0) {

@@ -14,11 +14,31 @@ describe('Worklog & Attendance Precision Utilities', () => {
       expect(result.entryStatus).toBe('on_time');
     });
 
-    it('recognizes arrival within the 30-min grace period (up to 09:30 AM) as on-time', () => {
-      const result = evaluateEntryPunctuality('09:30 AM');
+    it('recognizes arrival exactly at shift entry timing as on-time', () => {
+      const result = evaluateEntryPunctuality('09:30 AM', '09:30 AM');
       expect(result.isLate).toBe(false);
       expect(result.minutesLate).toBe(0);
       expect(result.entryStatus).toBe('on_time');
+    });
+
+    it('strictly marks staff as late when arriving even 1 minute past shift entry timing (zero tolerance)', () => {
+      const result = evaluateEntryPunctuality('09:31 AM', '09:30 AM');
+      expect(result.isLate).toBe(true);
+      expect(result.minutesLate).toBe(1);
+      expect(result.entryStatus).toBe('late');
+      expect(result.statusLabel).toBe('Late by 1 min');
+    });
+
+    it('respects custom official shift entry timing (e.g. 09:00 AM shift)', () => {
+      const onTime = evaluateEntryPunctuality('09:00 AM', '09:00 AM');
+      expect(onTime.isLate).toBe(false);
+      expect(onTime.entryStatus).toBe('on_time');
+
+      const oneMinLate = evaluateEntryPunctuality('09:01 AM', '09:00 AM');
+      expect(oneMinLate.isLate).toBe(true);
+      expect(oneMinLate.minutesLate).toBe(1);
+      expect(oneMinLate.entryStatus).toBe('late');
+      expect(oneMinLate.statusLabel).toBe('Late by 1 min');
     });
 
     it('correctly flags arrival after grace period as late and computes minutes late', () => {

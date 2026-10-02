@@ -211,8 +211,9 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Precise Entry Punctuality Evaluation
-        const punctuality = evaluateEntryPunctuality(currentTime);
+        // Precise Entry Punctuality Evaluation against configured shift timing
+        const shiftEntry = user.entryTime || user.shiftTiming?.entryTime || '09:30 AM';
+        const punctuality = evaluateEntryPunctuality(currentTime, shiftEntry);
         const initialStatus: StaffAttendanceStatus = punctuality.entryStatus === 'half_day' ? 'half_day' : punctuality.isLate ? 'late' : 'present';
         const mappedAttStatus = initialStatus === 'late' ? 'Late' : initialStatus === 'half_day' ? 'Half-Day' : 'Present';
 
@@ -365,7 +366,8 @@ export async function POST(request: NextRequest) {
         const isMultiDay = sessionStartDate !== liveInfo.isoDate;
         const daysSpanned = isMultiDay ? differenceInCalendarDays(sessionStartDate, liveInfo.isoDate) + 1 : 1;
 
-        workingCalc = calculateWorkingTime(activeWlData.loginTime as string, currentTime, sessionStartDate, liveInfo.isoDate);
+        const shiftEntry = user.entryTime || user.shiftTiming?.entryTime || '09:30 AM';
+        workingCalc = calculateWorkingTime(activeWlData.loginTime as string, currentTime, sessionStartDate, liveInfo.isoDate, shiftEntry);
         if (!workingCalc || workingCalc.totalMinutes <= 0) throw new Error('INVALID_TIME');
 
         const finalStatus = isMultiDay ? 'present' : workingCalc.attendanceStatus;

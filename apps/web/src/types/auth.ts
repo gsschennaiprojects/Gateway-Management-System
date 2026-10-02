@@ -77,7 +77,12 @@ export interface User {
   name: string;
   email: string;
   mobile: string;
+  phone?: string;
+  bio?: string;
+  department?: string;
+  socialLinks?: Record<string, string>;
   role: UserRole;
+  previousRoles?: string[];
   status: UserStatus;
   branch: Branch;
   gender?: 'male' | 'female' | 'other' | string;

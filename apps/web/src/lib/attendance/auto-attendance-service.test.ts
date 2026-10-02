@@ -84,8 +84,15 @@ describe('auto-attendance-service: registerStaffAttendanceOnLogin', () => {
     expect(mockDb.runTransaction).not.toHaveBeenCalled();
   });
 
-  it('registers attendance as present across staff_attendance, attendance, and daily_worklogs on login', async () => {
-    await registerStaffAttendanceOnLogin(activeUser);
+  it('registers attendance as present on login when within shift entry timing', async () => {
+    // User configured with late shift so current test execution time is on-time
+    const onTimeUser: User = {
+      ...activeUser,
+      entryTime: '11:59 PM',
+      shiftTiming: { entryTime: '11:59 PM', exitTime: '11:59 PM' },
+    };
+
+    await registerStaffAttendanceOnLogin(onTimeUser);
 
     expect(mockDb.runTransaction).toHaveBeenCalledTimes(1);
     expect(mockTransaction.get).toHaveBeenCalledTimes(3);
@@ -93,7 +100,7 @@ describe('auto-attendance-service: registerStaffAttendanceOnLogin', () => {
     const { getLiveDateInfo } = await import('@/lib/worklogs/worklog-session-utils');
     const { day } = getLiveDateInfo();
 
-    // Matrix grid set
+    // Matrix grid set as present
     expect(mockTransaction.set).toHaveBeenCalledWith(
       expect.objectContaining({ id: expect.stringContaining('att_GSSEMP684_') }),
       expect.objectContaining({
@@ -123,6 +130,34 @@ describe('auto-attendance-service: registerStaffAttendanceOnLogin', () => {
         userId: 'GSSEMP684',
         attendanceStatus: 'present',
       })
+    );
+  });
+
+  it('registers attendance as late on login when past shift entry timing even by 1 minute', async () => {
+    // User configured with early morning shift so current execution time is late
+    const lateUser: User = {
+      ...activeUser,
+      id: 'GSSEMP685',
+      employeeId: 'GSSEMP685',
+      entryTime: '06:00 AM',
+      shiftTiming: { entryTime: '06:00 AM', exitTime: '03:00 PM' },
+    };
+
+    await registerStaffAttendanceOnLogin(lateUser);
+
+    const { getLiveDateInfo } = await import('@/lib/worklogs/worklog-session-utils');
+    const { day } = getLiveDateInfo();
+
+    // Matrix grid set as late
+    expect(mockTransaction.set).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.stringContaining('att_GSSEMP685_') }),
+      expect.objectContaining({
+        staffId: 'GSSEMP685',
+        attendance: expect.objectContaining({
+          [day]: expect.stringMatching(/late|half_day/),
+        }),
+      }),
+      { merge: true }
     );
   });
 

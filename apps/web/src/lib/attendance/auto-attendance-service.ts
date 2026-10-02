@@ -1,5 +1,5 @@
 import { getAdminFirestore } from '@/lib/firebase/firebase-admin';
-import { getLiveDateInfo, getDatesBetween } from '@/lib/worklogs/worklog-session-utils';
+import { getLiveDateInfo, getDatesBetween, evaluateEntryPunctuality } from '@/lib/worklogs/worklog-session-utils';
 import type { User } from '@/types/auth';
 
 /**
@@ -114,6 +114,13 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
   const now = new Date();
   const timestamp = now.toISOString();
 
+  // Strict Shift-Based Punctuality Evaluation
+  // Evaluates against staff member's configured shift entry timing (default: 09:30 AM)
+  const shiftEntry = user.entryTime || user.shiftTiming?.entryTime || '09:30 AM';
+  const punctuality = evaluateEntryPunctuality(currentTime, shiftEntry);
+  const status: 'present' | 'late' | 'half_day' = punctuality.entryStatus === 'half_day' ? 'half_day' : punctuality.isLate ? 'late' : 'present';
+  const displayStatus = status === 'late' ? 'Late' : status === 'half_day' ? 'Half-Day' : 'Present';
+
   // 1. In-memory worklog store fallback
   try {
     const { addWorkLog } = await import('@/lib/worklogs/worklog-store');
@@ -128,7 +135,7 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
       logoutTime: null,
       plannedTasks: [],
       completedTasks: [],
-      attendanceStatus: 'present',
+      attendanceStatus: status,
     });
   } catch {
     // Non-blocking in-memory fallback
@@ -194,9 +201,9 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
           };
 
       const currentAttMap = { ...((gridData.attendance as Record<string, string>) || {}) };
-      // Register today's day as present on login (preserve if already late or half_day)
+      // Register today's day based on strict punctuality (preserve if already explicitly recorded)
       if (!currentAttMap[day]) {
-        currentAttMap[day] = 'present';
+        currentAttMap[day] = status;
       }
 
       transaction.set(
@@ -238,7 +245,10 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
           day: liveInfo.dayOfWeek,
           checkIn: currentTime,
           loginTime: currentTime,
-          status: 'Present',
+          status: displayStatus,
+          isLate: punctuality.isLate,
+          minutesLate: punctuality.minutesLate,
+          shiftEntryTime: shiftEntry,
           markedBy: 'Auto-Login (System)',
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -259,7 +269,10 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
           logoutTime: null,
           plannedTasks: [],
           completedTasks: [],
-          attendanceStatus: 'present',
+          attendanceStatus: status,
+          isLate: punctuality.isLate,
+          minutesLate: punctuality.minutesLate,
+          verifiedStatus: punctuality.statusLabel,
           hoursLogged: 0,
           totalHours: 'Active',
           workingMinutes: 0,
@@ -269,13 +282,16 @@ export async function registerStaffAttendanceOnLogin(user: User): Promise<void> 
       } else if (!wlSnap.data()?.loginTime) {
         transaction.update(wlRef, {
           loginTime: currentTime,
-          attendanceStatus: 'present',
+          attendanceStatus: status,
+          isLate: punctuality.isLate,
+          minutesLate: punctuality.minutesLate,
+          verifiedStatus: punctuality.statusLabel,
           updatedAt: timestamp,
         });
       }
     });
 
-    console.log(`[AutoAttendance] Registered attendance as 'present' for ${user.name} (${staffId}) on ${isoDate} at ${currentTime}`);
+    console.log(`[AutoAttendance] Registered attendance as '${status}' (shift entry: ${shiftEntry}, login: ${currentTime}) for ${user.name} (${staffId}) on ${isoDate}`);
   } catch (err) {
     console.error('[AutoAttendance] Error registering attendance on login:', err);
   }
